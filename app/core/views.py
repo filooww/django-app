@@ -2,6 +2,7 @@ import os
 import socket
 
 from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
 from django.http import HttpResponse, JsonResponse
 
 from .models import Visit
@@ -25,10 +26,18 @@ def healthz(request):
 
 
 def readyz(request):
-    """Readiness: the app can serve traffic, i.e. the DB is reachable."""
+    """Readiness: the DB is reachable AND all migrations are applied.
+
+    While the migrate Job of a new version is still running, new pods stay NotReady,
+    so the Service does not send them traffic.
+    """
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
+        executor = MigrationExecutor(connection)
+        pending = executor.migration_plan(executor.loader.graph.leaf_nodes())
     except Exception as exc:  # noqa: BLE001
         return HttpResponse(f"db not ready: {exc}\n", status=503)
+    if pending:
+        return HttpResponse(f"migrations pending: {len(pending)}\n", status=503)
     return HttpResponse("ready\n")
