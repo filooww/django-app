@@ -105,3 +105,17 @@ Stop:
 ```bash
 docker-compose down
 ```
+
+## Screenshots
+
+Containers started with Docker Compose (`migrate` exited with code 0, the rest are healthy):
+
+![docker-compose ps](screenshots/compose-ps.png)
+
+Requests through nginx, the visit counter is stored in PostgreSQL:
+
+![curl](screenshots/compose-curl.png)
+
+Published image in GitHub Container Registry:
+
+![ghcr package](screenshots/ghcr-package.png)
