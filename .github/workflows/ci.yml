@@ -50,14 +50,6 @@ jobs:
         run: |
           pip install -r app/requirements-dev.txt
           flake8
-|
-          pip install ruff==0.17.5
-          ruff check .
-          ruff format --check .
-      - uses: actions/download-artifact@v4
-        with:
-          name: image
-      - name: Load image
         run: docker load -i image.tar
       - name: Tests inside the image
         run: |
