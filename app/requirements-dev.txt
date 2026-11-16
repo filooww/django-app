@@ -1,2 +1,4 @@
 -r requirements.txt
-ruff==0.17.5
+flake8==7.5.0
+flake8-bugbear==26.10.27
+flake8-bandit==4.1.1
