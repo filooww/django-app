@@ -1,0 +1,10 @@
+# Linter settings (flake8). Run from the repository root:  flake8
+[flake8]
+max-line-length = 100
+exclude = .git,.venv,__pycache__,app/*/migrations
+# Plugins (see app/requirements-dev.txt):
+#   B - flake8-bugbear: likely bugs
+#   S - flake8-bandit:  security issues
+extend-select = B,S
+show-source = true
+statistics = true

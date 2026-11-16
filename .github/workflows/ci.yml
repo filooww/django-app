@@ -1,0 +1,175 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop]
+    tags: ["v*"]                       # релиз: v1.0.3 -> все 6 этапов
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/filooww/django-app
+
+jobs:
+  # ---------- 1. BUILD ----------
+  build:
+    runs-on: ubuntu-24.04-arm          # arm64, как наши ноды
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t django-app:ci .
+      - name: Save image to file
+        run: docker save django-app:ci -o image.tar
+      - uses: actions/upload-artifact@v4   # передаём образ следующим job'ам
+        with:
+          name: image
+          path: image.tar
+          retention-days: 1
+
+  # ---------- 2. TEST ----------
+  test:
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    services:
+      postgres:                         # настоящая БД на время тестов
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: app
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Lint (flake8)
+        run: |
+          pip install -r app/requirements-dev.txt
+          flake8
+      - uses: actions/download-artifact@v4
+        with:
+          name: image
+      - name: Load image
+        run: docker load -i image.tar
+      - name: Tests inside the image
+        run: |
+          docker run --rm --network host \
+            -e DJANGO_SECRET_KEY=ci-only \
+            -e DB_PASSWORD=test \
+            -e DB_HOST=127.0.0.1 \
+            django-app:ci \
+            sh -c "python manage.py makemigrations --check --dry-run && python manage.py test --verbosity 2"
+
+  # ---------- 3. SCAN ----------
+  scan:
+    needs: test
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: image
+      - name: Trivy vulnerability scan
+        run: |
+          docker run --rm -v "$PWD:/scan" aquasec/trivy:0.58.1 image \
+            --input /scan/image.tar \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1
+
+  # ---------- 4. PACKAGE (только на теге vX.Y.Z) ----------
+  package:
+    needs: scan
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write                   # право пушить в ghcr.io
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - name: Version from tag (v1.0.3 -> 1.0.3)
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          name: image
+      - name: Load the tested image
+        run: docker load -i image.tar
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag and push
+        run: |
+          docker tag django-app:ci "$IMAGE:${{ steps.ver.outputs.version }}"
+          docker push "$IMAGE:${{ steps.ver.outputs.version }}"
+
+  # ---------- 5. DEPLOY (GitOps: коммит в django-gitops) ----------
+  deploy:
+    needs: package
+    runs-on: ubuntu-24.04-arm
+    concurrency: gitops-deploy          # два релиза не пушат в gitops одновременно
+    env:
+      VERSION: ${{ needs.package.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: filooww/django-gitops
+          token: ${{ secrets.GITOPS_TOKEN }}
+      - name: Set new image tag
+        run: |
+          sed -i -E "/^django:/,/^[a-z]/ s|^(    tag: ).*|\1\"$VERSION\"|" charts/django-app/values.yaml
+          sed -i -E "s|^appVersion: .*|appVersion: \"$VERSION\"|" charts/django-app/Chart.yaml
+          git diff
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Deploy django-app $VERSION"
+          git push
+
+  # ---------- 6. VERIFY (self-hosted runner внутри сети кластера) ----------
+  verify:
+    needs: [package, deploy]
+    runs-on: [self-hosted, k8s-cp1]
+    timeout-minutes: 15
+    env:
+      VERSION: ${{ needs.package.outputs.version }}
+      NS: django
+      DEPLOY: django-django
+      URL: http://192.168.252.10:30080
+    steps:
+      - name: Ask Argo CD to re-read Git now
+        run: kubectl -n argocd annotate application django argocd.argoproj.io/refresh=normal --overwrite
+      - name: Wait until Argo applied the new tag
+        run: |
+          for i in $(seq 1 60); do
+            img=$(kubectl -n $NS get deploy $DEPLOY -o jsonpath='{.spec.template.spec.containers[0].image}')
+            echo "deployment image: $img"
+            [ "$img" = "ghcr.io/filooww/django-app:$VERSION" ] && exit 0
+            sleep 10
+          done
+          echo "Argo did not apply $VERSION in 10 minutes"; exit 1
+      - name: Wait for rollout
+        run: kubectl -n $NS rollout status deploy/$DEPLOY --timeout=5m
+      - name: Argo app is Synced and Healthy
+        run: |
+          kubectl -n argocd wait application/django --for=jsonpath='{.status.health.status}'=Healthy --timeout=3m
+          kubectl -n argocd get application django
+      - name: Smoke test
+        run: |
+          curl -fsS "$URL/readyz"
+          for i in 1 2 3 4 5 6; do
+            out=$(curl -fsS "$URL/")
+            echo "$out"
+            echo "$out" | grep -q "\"version\": \"$VERSION\"" || { echo "wrong version"; exit 1; }
+          done
