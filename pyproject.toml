@@ -1,0 +1,22 @@
+# Linter and formatter settings (ruff). Run from the repository root:
+#   ruff check .            - lint
+#   ruff format --check .   - check formatting
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["app"]  # so `core` and `config` are treated as our own (first-party) packages
+extend-exclude = ["app/*/migrations"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",  # pycodestyle: style errors and warnings
+    "F",       # pyflakes: unused imports/variables, undefined names
+    "I",       # isort: import order
+    "B",       # bugbear: likely bugs
+    "UP",      # pyupgrade: modern Python syntax
+    "S",       # bandit: security issues
+    "BLE",     # blind `except Exception`
+    "DJ",      # Django-specific rules
+    "C4",      # comprehensions
+    "SIM",     # simplifications
+]
