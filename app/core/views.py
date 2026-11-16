@@ -12,12 +12,14 @@ def index(request):
     """Writes a row to PostgreSQL on every request: proves the DB connection works."""
     host = socket.gethostname()
     Visit.objects.create(hostname=host)
-    return JsonResponse({
-        "app": os.environ.get("APP_NAME", "django-app"),
-        "version": os.environ.get("APP_VERSION", "dev"),
-        "served_by": host,
-        "total_visits": Visit.objects.count(),
-    })
+    return JsonResponse(
+        {
+            "app": os.environ.get("APP_NAME", "django-app"),
+            "version": os.environ.get("APP_VERSION", "dev"),
+            "served_by": host,
+            "total_visits": Visit.objects.count(),
+        }
+    )
 
 
 def healthz(request):

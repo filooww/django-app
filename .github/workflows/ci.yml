@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm          # arm64, как наши ноды
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t django-app:ci .
+      - name: Save image to file
+        run: docker save django-app:ci -o image.tar
+      - uses: actions/upload-artifact@v4   # передаём образ следующим job'ам
+        with:
+          name: image
+          path: image.tar
+          retention-days: 1
+
+  test:
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    services:
+      postgres:                         # настоящая БД на время тестов
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: app
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Lint (flake8)
+        run: |
+          pip install -r app/requirements-dev.txt
+          flake8
+      - uses: actions/download-artifact@v4
+        with:
+          name: image
+      - name: Load image
+        run: docker load -i image.tar
+      - name: Tests inside the image
+        run: |
+          docker run --rm --network host \
+            -e DJANGO_SECRET_KEY=ci-only \
+            -e DB_PASSWORD=test \
+            -e DB_HOST=127.0.0.1 \
+            django-app:ci \
+            sh -c "python manage.py makemigrations --check --dry-run && python manage.py test --verbosity 2"
+
+  scan:
+    needs: test
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: image
+      - name: Trivy vulnerability scan
+        run: |
+          docker run --rm -v "$PWD:/scan" aquasec/trivy:0.58.1 image \
+            --input /scan/image.tar \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1

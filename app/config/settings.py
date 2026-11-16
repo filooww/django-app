@@ -1,4 +1,5 @@
 """Django settings. All environment-specific values come from env variables (12-factor)."""
+
 import os
 from pathlib import Path
 
