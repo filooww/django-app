@@ -5,7 +5,7 @@ on:
     branches: [develop, main]
   push:
     branches: [develop]
-    tags: ["v*"]                     # релиз: v1.0.4 -> все этапы
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -14,24 +14,21 @@ env:
   IMAGE: ghcr.io/filooww/django-app
 
 jobs:
-  # build -> test -> scan -> package (один job, образ собирается один раз)
   ci:
-    runs-on: ubuntu-24.04-arm        # arm64, как ноды кластера
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
-      packages: write                # push в ghcr
+      packages: write
     services:
-      postgres:                      # настоящая БД для тестов
+      postgres:
         image: postgres:16-alpine
         env: { POSTGRES_DB: app, POSTGRES_USER: app, POSTGRES_PASSWORD: test }
         ports: ["5432:5432"]
         options: --health-cmd "pg_isready -U app" --health-interval 5s --health-retries 10
-    outputs:
-      version: ${{ steps.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Image tags                 # v1.0.4 -> 1.0.4, иначе sha-<commit>
+      - name: Image tags
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -46,9 +43,10 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          load: true                     # оставить образ локально для test и scan
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha           # кэш слоёв между запусками
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - uses: actions/setup-python@v5
@@ -82,50 +80,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Package                    # пушим ровно тот образ, который тестировали
+      - name: Package
         if: startsWith(github.ref, 'refs/tags/v')
         run: docker push ${{ env.IMAGE }}:${{ steps.meta.outputs.version }}
-
-  # deploy: GitOps — меняем тег в django-gitops, выкатывает Argo CD
-  deploy:
-    needs: ci
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-24.04-arm
-    concurrency: gitops-deploy
-    env:
-      VERSION: ${{ needs.ci.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: filooww/django-gitops
-          token: ${{ secrets.GITOPS_TOKEN }}
-
-      - name: Bump image tag
-        run: |
-          sed -i -E "/^django:/,/^[a-z]/ s|^(    tag: ).*|\1\"$VERSION\"|" charts/django-app/values.yaml
-          sed -i -E "s|^appVersion: .*|appVersion: \"$VERSION\"|" charts/django-app/Chart.yaml
-
-      - uses: stefanzweifel/git-auto-commit-action@v5   # commit + push, без ошибки если уже задеплоено
-        with:
-          commit_message: Deploy django-app ${{ env.VERSION }}
-
-  # verify: self-hosted runner внутри сети кластера
-  verify:
-    needs: [ci, deploy]
-    runs-on: [self-hosted, k8s-cp1]
-    timeout-minutes: 15
-    env:
-      VERSION: ${{ needs.ci.outputs.version }}
-      URL: http://192.168.252.10:30080
-    steps:
-      - name: Wait for Argo CD rollout
-        run: |
-          kubectl -n argocd annotate application django argocd.argoproj.io/refresh=normal --overwrite
-          kubectl -n django wait deploy/django-django --timeout=10m \
-            --for=jsonpath='{.spec.template.spec.containers[0].image}'="$IMAGE:$VERSION"
-          kubectl -n django rollout status deploy/django-django --timeout=5m
-
-      - name: Smoke test
-        run: |
-          curl -fsS "$URL/readyz"
-          curl -fsS "$URL/" | grep "\"version\": \"$VERSION\""
