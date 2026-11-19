@@ -25,8 +25,6 @@ jobs:
         env: { POSTGRES_DB: app, POSTGRES_USER: app, POSTGRES_PASSWORD: test }
         ports: ["5432:5432"]
         options: --health-cmd "pg_isready -U app" --health-interval 5s --health-retries 10
-    outputs:
-      version: ${{ steps.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -47,6 +45,7 @@ jobs:
           context: .
           load: true
           tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -84,45 +83,3 @@ jobs:
       - name: Package
         if: startsWith(github.ref, 'refs/tags/v')
         run: docker push ${{ env.IMAGE }}:${{ steps.meta.outputs.version }}
-
-  deploy:
-    needs: ci
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-24.04-arm
-    concurrency: gitops-deploy
-    env:
-      VERSION: ${{ needs.ci.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: filooww/django-gitops
-          token: ${{ secrets.GITOPS_TOKEN }}
-
-      - name: Bump image tag
-        run: |
-          sed -i -E "/^django:/,/^[a-z]/ s|^(    tag: ).*|\1\"$VERSION\"|" charts/django-app/values.yaml
-          sed -i -E "s|^appVersion: .*|appVersion: \"$VERSION\"|" charts/django-app/Chart.yaml
-
-      - uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: Deploy django-app ${{ env.VERSION }}
-
-  verify:
-    needs: [ci, deploy]
-    runs-on: [self-hosted, k8s-cp1]
-    timeout-minutes: 15
-    env:
-      VERSION: ${{ needs.ci.outputs.version }}
-      URL: http://192.168.252.10:30080
-    steps:
-      - name: Wait for Argo CD rollout
-        run: |
-          kubectl -n argocd annotate application django argocd.argoproj.io/refresh=normal --overwrite
-          kubectl -n django wait deploy/django-django --timeout=10m \
-            --for=jsonpath='{.spec.template.spec.containers[0].image}'="$IMAGE:$VERSION"
-          kubectl -n django rollout status deploy/django-django --timeout=5m
-
-      - name: Smoke test
-        run: |
-          curl -fsS "$URL/readyz"
-          curl -fsS "$URL/" | grep "\"version\": \"$VERSION\""
