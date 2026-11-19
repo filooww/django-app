@@ -5,7 +5,7 @@ on:
     branches: [develop, main]
   push:
     branches: [develop]
-    tags: ["v*"]                     # релиз: v1.0.4 -> все этапы
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -14,14 +14,13 @@ env:
   IMAGE: ghcr.io/filooww/django-app
 
 jobs:
-  # build -> test -> scan -> package (один job, образ собирается один раз)
   ci:
-    runs-on: ubuntu-24.04-arm        # arm64, как ноды кластера
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
-      packages: write                # push в ghcr
+      packages: write
     services:
-      postgres:                      # настоящая БД для тестов
+      postgres:
         image: postgres:16-alpine
         env: { POSTGRES_DB: app, POSTGRES_USER: app, POSTGRES_PASSWORD: test }
         ports: ["5432:5432"]
@@ -31,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Image tags                 # v1.0.4 -> 1.0.4, иначе sha-<commit>
+      - name: Image tags
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -46,9 +45,9 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          load: true                     # оставить образ локально для test и scan
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha           # кэш слоёв между запусками
+          cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - uses: actions/setup-python@v5
@@ -82,11 +81,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Package                    # пушим ровно тот образ, который тестировали
+      - name: Package
         if: startsWith(github.ref, 'refs/tags/v')
         run: docker push ${{ env.IMAGE }}:${{ steps.meta.outputs.version }}
 
-  # deploy: GitOps — меняем тег в django-gitops, выкатывает Argo CD
   deploy:
     needs: ci
     if: startsWith(github.ref, 'refs/tags/v')
@@ -105,11 +103,10 @@ jobs:
           sed -i -E "/^django:/,/^[a-z]/ s|^(    tag: ).*|\1\"$VERSION\"|" charts/django-app/values.yaml
           sed -i -E "s|^appVersion: .*|appVersion: \"$VERSION\"|" charts/django-app/Chart.yaml
 
-      - uses: stefanzweifel/git-auto-commit-action@v5   # commit + push, без ошибки если уже задеплоено
+      - uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: Deploy django-app ${{ env.VERSION }}
 
-  # verify: self-hosted runner внутри сети кластера
   verify:
     needs: [ci, deploy]
     runs-on: [self-hosted, k8s-cp1]
