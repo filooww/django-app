@@ -1,0 +1,23 @@
+project_name: devops-aws
+timezone: Europe/Sofia
+
+admin_user: deploy
+
+common_packages:
+  - acl
+  - ca-certificates
+  - curl
+  - gnupg
+  - htop
+  - jq
+  - unzip
+  - python3
+  - python3-apt
+
+db_name: django
+db_user: django
+db_port: 5432
+db_password: "{{ vault_db_password }}"
+db_host: "{{ hostvars[groups['database'][0]]['private_ip'] }}"
+
+# Encrypted values are appended below with ansible-vault encrypt_string

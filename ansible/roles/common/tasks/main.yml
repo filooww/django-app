@@ -1,0 +1,98 @@
+- name: Check that the host runs Ubuntu
+  ansible.builtin.assert:
+    that: ansible_distribution == "Ubuntu"
+    fail_msg: "Only Ubuntu is supported, got {{ ansible_distribution }}"
+    quiet: true
+
+- name: Wait for cloud-init to finish (it holds the apt lock on first boot)
+  ansible.builtin.command: cloud-init status --wait
+  changed_when: false
+
+- name: Update apt package index
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
+    state: present
+
+- name: Set timezone
+  community.general.timezone:
+    name: "{{ timezone }}"
+
+- name: Set hostname
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Resolve own hostname locally
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1\s'
+    line: "127.0.1.1 {{ inventory_hostname }}"
+
+- name: Create admin user
+  ansible.builtin.user:
+    name: "{{ admin_user }}"
+    groups: sudo
+    append: true
+    shell: /bin/bash
+    create_home: true
+
+- name: Allow admin user to use sudo without password
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/90-{{ admin_user }}"
+    content: "{{ admin_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: visudo -cf %s
+
+- name: Create .ssh directory for admin user
+  ansible.builtin.file:
+    path: "/home/{{ admin_user }}/.ssh"
+    state: directory
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0700"
+
+- name: Give admin user the same SSH key as ubuntu
+  ansible.builtin.copy:
+    src: /home/ubuntu/.ssh/authorized_keys
+    dest: "/home/{{ admin_user }}/.ssh/authorized_keys"
+    remote_src: true
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0600"
+
+- name: Harden SSH daemon
+  ansible.builtin.template:
+    src: sshd-hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/10-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Restart ssh
+
+- name: Check memory
+  ansible.builtin.assert:
+    that: ansible_memtotal_mb >= 1500
+    fail_msg: "At least 1.5 GB RAM expected, found {{ ansible_memtotal_mb }} MB"
+    quiet: true
+
+- name: Check free space on root filesystem
+  vars:
+    root_mount: "{{ ansible_mounts | selectattr('mount', 'equalto', '/') | first }}"
+  ansible.builtin.assert:
+    that: root_mount.size_available > 2 * 1024 * 1024 * 1024
+    fail_msg: "Less than 2 GB free on /"
+    quiet: true
+
+- name: Show system resources
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: {{ ansible_processor_vcpus }} vCPU,
+      {{ ansible_memtotal_mb }} MB RAM,
+      {{ ((ansible_mounts | selectattr('mount', 'equalto', '/') | first).size_available / 1024**3) | round(1) }} GB free on /

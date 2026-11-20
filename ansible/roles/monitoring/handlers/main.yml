@@ -1,0 +1,5 @@
+- name: Reload CloudWatch Agent config
+  ansible.builtin.command: >-
+    /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
+    -a fetch-config -m ec2 -s -c file:{{ monitoring_agent_config }}
+  changed_when: true

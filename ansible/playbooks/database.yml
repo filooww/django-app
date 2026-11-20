@@ -1,0 +1,6 @@
+- name: PostgreSQL server
+  hosts: database
+  become: true
+  roles:
+    - ebs
+    - postgresql

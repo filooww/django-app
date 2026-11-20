@@ -50,6 +50,14 @@ class HealthzTests(TestCase):
             self.client.get("/healthz")
 
 
+class HealthTests(TestCase):
+    def test_health_reports_db_and_migrations(self):
+        response = self.client.get("/health/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"ready\n")
+
+
 class ReadyzTests(TestCase):
     def test_ready_when_db_is_up_and_migrated(self):
         response = self.client.get("/readyz")

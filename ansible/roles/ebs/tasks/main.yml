@@ -1,0 +1,65 @@
+- name: Check that the volume ID is known
+  ansible.builtin.assert:
+    that: ebs_volume_id is defined and ebs_volume_id is match('^vol-')
+    fail_msg: "ebs_volume_id is missing, regenerate the inventory from Terraform outputs"
+    quiet: true
+
+# On Nitro instances /dev/sdf shows up as /dev/nvmeXn1, so the volume is found by its ID
+- name: Build the device path from the volume ID
+  ansible.builtin.set_fact:
+    ebs_device: "/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_{{ ebs_volume_id | replace('-', '') }}"
+
+- name: Wait for the EBS device
+  ansible.builtin.wait_for:
+    path: "{{ ebs_device }}"
+    timeout: 120
+
+- name: Read existing filesystem type
+  ansible.builtin.command: blkid -o value -s TYPE {{ ebs_device }}
+  register: ebs_blkid_type
+  changed_when: false
+  failed_when: ebs_blkid_type.rc not in [0, 2]
+
+- name: Refuse to touch a disk with a different filesystem
+  ansible.builtin.assert:
+    that: ebs_blkid_type.stdout in ['', ebs_fstype]
+    fail_msg: "{{ ebs_device }} already has {{ ebs_blkid_type.stdout }}, expected {{ ebs_fstype }}. Not formatting."
+    quiet: true
+
+- name: Create filesystem only if the disk is empty
+  community.general.filesystem:
+    dev: "{{ ebs_device }}"
+    fstype: "{{ ebs_fstype }}"
+    force: false
+  when: ebs_blkid_type.stdout == ''
+
+- name: Read filesystem UUID
+  ansible.builtin.command: blkid -o value -s UUID {{ ebs_device }}
+  register: ebs_uuid
+  changed_when: false
+
+- name: Create mount point
+  ansible.builtin.file:
+    path: "{{ ebs_mount_point }}"
+    state: directory
+    mode: "0755"
+
+- name: Mount the volume and add it to /etc/fstab
+  ansible.posix.mount:
+    path: "{{ ebs_mount_point }}"
+    src: "UUID={{ ebs_uuid.stdout }}"
+    fstype: "{{ ebs_fstype }}"
+    opts: "{{ ebs_mount_opts }}"
+    state: mounted
+  register: ebs_mount
+
+- name: Reboot once to prove the mount survives a restart
+  ansible.builtin.reboot:
+    reboot_timeout: 600
+  when: ebs_mount.changed and ebs_verify_reboot | bool
+
+- name: Check the volume is mounted
+  ansible.builtin.command: findmnt -n -o SOURCE,FSTYPE {{ ebs_mount_point }}
+  register: ebs_findmnt
+  changed_when: false
+  failed_when: ebs_findmnt.rc != 0 or ebs_fstype not in ebs_findmnt.stdout

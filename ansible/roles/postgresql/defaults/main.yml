@@ -1,0 +1,7 @@
+postgresql_version: "16"
+postgresql_data_mount: /var/lib/postgresql
+postgresql_conf_dir: "/etc/postgresql/{{ postgresql_version }}/main"
+postgresql_data_dir: "{{ postgresql_data_mount }}/{{ postgresql_version }}/main"
+postgresql_listen_addresses: localhost
+postgresql_shared_buffers: 128MB
+postgresql_max_connections: 100

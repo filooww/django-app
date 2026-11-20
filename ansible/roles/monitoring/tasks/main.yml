@@ -1,0 +1,33 @@
+- name: Download CloudWatch Agent package
+  ansible.builtin.get_url:
+    url: "{{ monitoring_agent_url }}"
+    dest: /var/cache/amazon-cloudwatch-agent.deb
+    mode: "0644"
+
+- name: Install CloudWatch Agent
+  ansible.builtin.apt:
+    deb: /var/cache/amazon-cloudwatch-agent.deb
+
+- name: Write CloudWatch Agent configuration
+  ansible.builtin.template:
+    src: amazon-cloudwatch-agent.json.j2
+    dest: "{{ monitoring_agent_config }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload CloudWatch Agent config
+
+- name: Apply configuration now
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start CloudWatch Agent
+  ansible.builtin.service:
+    name: amazon-cloudwatch-agent
+    state: started
+    enabled: true
+
+- name: Check CloudWatch Agent status
+  ansible.builtin.command: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a status
+  register: monitoring_status
+  changed_when: false
+  failed_when: (monitoring_status.stdout | from_json).status != 'running'

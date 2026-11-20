@@ -1,0 +1,11 @@
+django_image: ghcr.io/filooww/django-app
+django_port: 8000
+django_debug: "False"
+django_allowed_hosts: "{{ ansible_host }},{{ private_ip }},localhost,127.0.0.1"
+django_secret_key: "{{ vault_django_secret_key }}"
+
+docker_ghcr_username: filooww
+docker_ghcr_token: "{{ vault_ghcr_token | default('') }}"
+
+monitoring_disk_paths:
+  - /

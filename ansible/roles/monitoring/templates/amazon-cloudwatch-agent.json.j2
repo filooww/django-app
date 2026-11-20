@@ -1,0 +1,48 @@
+{% set logs = monitoring_base_logs + monitoring_extra_logs %}
+{
+  "agent": {
+    "metrics_collection_interval": {{ monitoring_interval }},
+    "run_as_user": "root",
+    "omit_hostname": true
+  },
+  "metrics": {
+    "namespace": "CWAgent",
+    "append_dimensions": {
+      "InstanceId": "${aws:InstanceId}"
+    },
+    "metrics_collected": {
+      "cpu": {
+        "totalcpu": true,
+        "measurement": ["cpu_usage_idle", "cpu_usage_user", "cpu_usage_system", "cpu_usage_iowait"]
+      },
+      "mem": {
+        "measurement": ["mem_used_percent", "mem_available"]
+      },
+      "disk": {
+        "resources": {{ monitoring_disk_paths | to_json }},
+        "drop_device": true,
+        "measurement": ["used_percent", "inodes_free"]
+      },
+      "diskio": {
+        "resources": ["*"],
+        "measurement": ["io_time", "read_bytes", "write_bytes", "reads", "writes"]
+      }
+    }
+  },
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+{% for log in logs %}
+          {
+            "file_path": "{{ log.path }}",
+            "log_group_name": "{{ monitoring_log_group_prefix }}/{{ log.name }}",
+            "log_stream_name": "{instance_id}",
+            "retention_in_days": 14
+          }{{ "," if not loop.last else "" }}
+{% endfor %}
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+- name: Common configuration
+  ansible.builtin.import_playbook: common.yml
+
+- name: Database
+  ansible.builtin.import_playbook: database.yml
+
+- name: Application
+  ansible.builtin.import_playbook: application.yml
+
+- name: Monitoring
+  hosts: all
+  become: true
+  roles:
+    - monitoring
