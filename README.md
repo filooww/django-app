@@ -148,7 +148,19 @@ CloudWatch Agent on both hosts ──► metrics (CWAgent) + logs, alarms: CPU, 
 ### Requirements
 
 - Terraform >= 1.11, AWS CLI v2, Ansible >= 2.17, jq
-- AWS CLI profile `devops` (`aws configure --profile devops`)
+- AWS CLI profile `devops` with short-lived credentials, no access keys on disk:
+
+  ```ini
+  # ~/.aws/config
+  [profile devops-login]
+  region = eu-central-1
+
+  [profile devops]
+  region = eu-central-1
+  credential_process = aws configure export-credentials --profile devops-login --format process
+  ```
+
+  Sign in with `aws login --profile devops-login` (valid up to 12 hours). Terraform does not read `aws login` sessions directly yet, so the `devops` profile hands them over through `credential_process`.
 - EC2 key pair `aws-key`, private key at `~/.ssh/aws-key.pem` (`chmod 400`)
 
 ### 1. Remote state bucket
