@@ -271,28 +271,28 @@ Published image in GitHub Container Registry:
 
 Terraform outputs after `terraform apply`:
 
-![terraform output](screenshots/aws-terraform-output.png)
+![terraform output](screenshots/ec2-terraform-output.png)
 
 `build-push.yaml` published `latest` and the commit SHA next to the release tag:
 
-![ghcr tags](screenshots/aws-ghcr-tags.png)
+![ghcr tags](screenshots/ec2-ghcr-tags.png)
 
 Django container on the application server, running the SHA tag with a passing health check:
 
-![docker ps](screenshots/aws-docker-ps.png)
+![docker ps](screenshots/ec2-docker-ps.png)
 
 The application answers through the public IP; the visit counter is stored in PostgreSQL on the other instance:
 
-![health and app](screenshots/aws-health.png)
+![health and app](screenshots/ec2-health.png)
 
 PostgreSQL data on the separate EBS volume, mounted by UUID through `/etc/fstab`:
 
-![ebs mount](screenshots/aws-ebs-mount.png)
+![ebs mount](screenshots/ec2-ebs-mount.png)
 
 A repeated `site.yml` run changes nothing (idempotent roles):
 
-![ansible idempotent](screenshots/aws-ansible-idempotent.png)
+![ansible idempotent](screenshots/ec2-ansible-idempotent.png)
 
 CloudWatch alarms for CPU, disk space and status checks:
 
-![cloudwatch alarms](screenshots/aws-cloudwatch-alarms.png)
+![cloudwatch alarms](screenshots/ec2-cloudwatch-alarms.png)
