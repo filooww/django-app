@@ -1,0 +1,6 @@
+- name: Django application server
+  hosts: django
+  become: true
+  roles:
+    - docker
+    - django

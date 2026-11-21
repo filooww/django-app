@@ -1,0 +1,112 @@
+- name: Check that the EBS volume is mounted before PostgreSQL is installed
+  ansible.builtin.command: mountpoint -q {{ postgresql_data_mount }}
+  changed_when: false
+
+- name: Create postgres group
+  ansible.builtin.group:
+    name: postgres
+    system: true
+
+- name: Create postgres user with home on the EBS volume
+  ansible.builtin.user:
+    name: postgres
+    group: postgres
+    system: true
+    home: "{{ postgresql_data_mount }}"
+    create_home: false
+    shell: /bin/bash
+
+- name: Give the mount point to postgres
+  ansible.builtin.file:
+    path: "{{ postgresql_data_mount }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: "0755"
+
+# When the EC2 instance is recreated, the data on EBS survives but the postgres UID may change
+- name: Look for an existing cluster on the volume
+  ansible.builtin.stat:
+    path: "{{ postgresql_data_dir }}/PG_VERSION"
+  register: postgresql_existing
+
+- name: Fix ownership of existing data after instance replacement
+  ansible.builtin.file:
+    path: "{{ postgresql_data_mount }}/{{ postgresql_version }}"
+    owner: postgres
+    group: postgres
+    recurse: true
+  when: postgresql_existing.stat.exists and postgresql_existing.stat.pw_name != 'postgres'
+
+- name: Install PostgreSQL
+  ansible.builtin.apt:
+    name:
+      - "postgresql-{{ postgresql_version }}"
+      - postgresql-contrib
+      - python3-psycopg2
+    state: present
+
+- name: Check that the data directory lives on the EBS volume
+  ansible.builtin.command: findmnt -n -o TARGET --target {{ postgresql_data_dir }}
+  register: postgresql_data_fs
+  changed_when: false
+  failed_when: postgresql_data_fs.stdout != postgresql_data_mount
+
+- name: Configure postgresql.conf settings
+  ansible.builtin.template:
+    src: app.conf.j2
+    dest: "{{ postgresql_conf_dir }}/conf.d/90-app.conf"
+    owner: postgres
+    group: postgres
+    mode: "0644"
+  notify: Restart postgresql
+
+- name: Configure client authentication
+  ansible.builtin.template:
+    src: pg_hba.conf.j2
+    dest: "{{ postgresql_conf_dir }}/pg_hba.conf"
+    owner: postgres
+    group: postgres
+    mode: "0640"
+  notify: Reload postgresql
+
+- name: Enable and start PostgreSQL
+  ansible.builtin.service:
+    name: postgresql
+    state: started
+    enabled: true
+
+- name: Apply configuration changes now
+  ansible.builtin.meta: flush_handlers
+
+- name: Create database user
+  community.postgresql.postgresql_user:
+    name: "{{ db_user }}"
+    password: "{{ db_password }}"
+  become: true
+  become_user: postgres
+  no_log: true
+
+- name: Create database
+  community.postgresql.postgresql_db:
+    name: "{{ db_name }}"
+    owner: "{{ db_user }}"
+    encoding: UTF-8
+  become: true
+  become_user: postgres
+
+- name: Wait for PostgreSQL on the private IP
+  ansible.builtin.wait_for:
+    host: "{{ private_ip }}"
+    port: "{{ db_port }}"
+    timeout: 30
+
+- name: Check login with the application user
+  community.postgresql.postgresql_query:
+    login_host: 127.0.0.1
+    login_user: "{{ db_user }}"
+    login_password: "{{ db_password }}"
+    login_db: "{{ db_name }}"
+    query: SELECT current_user, version()
+  no_log: true
+  changed_when: false

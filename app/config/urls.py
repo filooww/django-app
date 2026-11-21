@@ -6,4 +6,5 @@ urlpatterns = [
     path("", views.index),
     path("healthz", views.healthz),
     path("readyz", views.readyz),
+    path("health/", views.readyz),
 ]
