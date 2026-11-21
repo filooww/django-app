@@ -285,7 +285,7 @@ The application answers through the public IP; the visit counter is stored in Po
 
 ![health and app](screenshots/aws-health.png)
 
-PostgreSQL data on the separate EBS volume, mounted by UUID, listening only on localhost and the private IP:
+PostgreSQL data on the separate EBS volume, mounted by UUID through `/etc/fstab`:
 
 ![ebs mount](screenshots/aws-ebs-mount.png)
 
