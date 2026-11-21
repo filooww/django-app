@@ -128,12 +128,13 @@ Ansible (from the admin machine) ── pull ─────┘
 │                                                            │
 │  Django EC2 (t3.small)            PostgreSQL EC2 (t3.small)│
 │  Docker: gunicorn :8000  ──5432──► PostgreSQL 16 (apt)     │
-│  SG: 8000, 22 from admin IP        SG: 5432 from Django SG │
-│                                        22 from admin IP    │
+│  SG: 8000 from admin IP            SG: 5432 from Django SG │
+│  Elastic IP                        no SSH port open        │
 │                                    EBS gp3 20 GiB, encrypted│
 │                                    /var/lib/postgresql      │
 └────────────────────────────────────────────────────────────┘
 CloudWatch Agent on both hosts ──► metrics (CWAgent) + logs, alarms: CPU, disk, status check
+Admin access (shell and Ansible) ──► SSM Session Manager, port 22 closed
 ```
 
 ### Responsibilities
@@ -162,6 +163,7 @@ CloudWatch Agent on both hosts ──► metrics (CWAgent) + logs, alarms: CPU, 
 
   Sign in with `aws login --profile devops-login` (valid up to 12 hours). Terraform does not read `aws login` sessions directly yet, so the `devops` profile hands them over through `credential_process`.
 - EC2 key pair `aws-key`, private key at `~/.ssh/aws-key.pem` (`chmod 400`)
+- Session Manager plugin for the AWS CLI: `brew install --cask session-manager-plugin`
 
 ### 1. Remote state bucket
 
@@ -248,6 +250,8 @@ The `django` role pulls the image, runs `python manage.py migrate --noinput` in 
 | Image | `build-push.yaml` scans the image with Trivy before pushing; a HIGH or CRITICAL fixable CVE stops the push |
 | Django → PostgreSQL | TLS only: `hostssl` in `pg_hba.conf`, the client uses `PGSSLMODE=verify-ca` and trusts only the database server certificate, copied by Ansible |
 | AWS access | no long-lived access keys: `aws login` sessions; EC2 uses an instance profile with IMDSv2 |
+| Admin access to EC2 | port 22 is closed (`enable_ssh = false`). A shell is `aws ssm start-session`; Ansible runs SSH inside an SSM tunnel (`ProxyCommand ... AWS-StartSSHSession`), so the key still authenticates but nothing listens on the internet. Every session is recorded in CloudTrail |
+| IAM | one role per server: both get CloudWatch Agent, SSM and Parameter Store under their own prefix (`/devops-aws/dev/django/*`, `/devops-aws/dev/postgres/*`); only the PostgreSQL role may write backups |
 
 ### Backups
 
@@ -261,7 +265,7 @@ The instance role may only `PutObject` under `postgres/`; the bucket denies non-
 Run a backup now and restore it:
 
 ```bash
-ssh -i ~/.ssh/aws-key.pem ubuntu@$(terraform -chdir=terraform/environments/dev output -raw postgres_public_ip) 'sudo systemctl start pg-backup.service && sudo journalctl -u pg-backup -n 5 --no-pager'
+cd ansible && ansible database -b -m command -a 'systemctl start pg-backup.service' && cd ..
 aws s3 ls s3://$(terraform -chdir=terraform/environments/dev output -raw backup_bucket)/postgres/ --recursive --profile devops
 ```
 
@@ -278,11 +282,18 @@ cd terraform/environments/dev && terraform destroy
 
 The state bucket is not removed by this; delete it from `terraform/bootstrap` when the project is finished.
 
+### Admin access
+
+```bash
+aws ssm start-session --target $(terraform -chdir=terraform/environments/dev output -raw postgres_instance_id) --profile devops
+```
+
+Emergency SSH from the admin IP: `terraform apply -var enable_ssh=true`, then `CONNECTION=ssh ./inventory/generate.sh`.
+
 ### Next steps
 
-- Elastic IP for the Django host (public IP changes after stop/start)
-- Session Manager instead of SSH (the IAM role already has `AmazonSSMManagedInstanceCore`)
-- Private subnet for PostgreSQL with a NAT gateway
+- HTTPS: needs a domain (ACM certificate on an ALB, or Let's Encrypt behind a reverse proxy)
+- Private subnet for PostgreSQL with a NAT gateway or VPC endpoints for SSM, CloudWatch and S3
 
 ## Screenshots
 

@@ -136,6 +136,6 @@ data "aws_iam_policy_document" "backups_write" {
 
 resource "aws_iam_role_policy" "backups_write" {
   name   = "backups-write"
-  role   = aws_iam_role.ec2.id
+  role   = aws_iam_role.ec2["postgres"].id
   policy = data.aws_iam_policy_document.backups_write.json
 }

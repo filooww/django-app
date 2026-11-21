@@ -60,6 +60,12 @@ variable "postgres_data_volume_size" {
   default = 20
 }
 
+variable "enable_ssh" {
+  type        = bool
+  default     = false
+  description = "Open port 22 to admin_cidr. Off by default: admin access goes through SSM Session Manager"
+}
+
 variable "enable_ssm" {
   type    = bool
   default = true
