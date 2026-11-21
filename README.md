@@ -1,5 +1,24 @@
 # django-app
 
+[![pipeline](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Ffilooww%2Fdjango-app%2Fbadges%2Fpipeline.json&cacheSeconds=300)](https://github.com/filooww/django-app/actions)
+[![CVE](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Ffilooww%2Fdjango-app%2Fbadges%2Fcve.json&cacheSeconds=300)](https://github.com/filooww/django-app/actions/workflows/badges.yml)
+[![canary](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Ffilooww%2Fdjango-app%2Fbadges%2Fcanary.json&cacheSeconds=300)](https://github.com/filooww/django-gitops#progressive-delivery-and-automatic-rollback)
+[![k8s](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Ffilooww%2Fdjango-app%2Fbadges%2Fk8s.json&cacheSeconds=300)](https://github.com/filooww/django-gitops)
+[![ec2](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Ffilooww%2Fdjango-app%2Fbadges%2Fec2.json&cacheSeconds=300)](https://github.com/filooww/django-app#deploy-to-aws-ec2-terraform--ansible)
+
+Live data: `pipeline` and `CVE` come from GitHub Actions (`badges.yml`), `canary` and `k8s` from a CronJob in the cluster, `ec2` from the Ansible deploy. All of them write JSON to the `badges` branch.
+
+![Python](https://img.shields.io/badge/Python_3.12-3776AB?style=flat-square&logo=python&logoColor=white)
+![Django](https://img.shields.io/badge/Django-092E20?style=flat-square&logo=django&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL_16-4169E1?style=flat-square&logo=postgresql&logoColor=white)
+![Kubernetes](https://img.shields.io/badge/Kubernetes-326CE5?style=flat-square&logo=kubernetes&logoColor=white)
+![Argo CD + Rollouts](https://img.shields.io/badge/Argo_CD_%2B_Rollouts-EF7B4D?style=flat-square&logo=argo&logoColor=white)
+![Vault](https://img.shields.io/badge/Vault-FFEC6E?style=flat-square&logo=vault&logoColor=black)
+![Terraform](https://img.shields.io/badge/Terraform-7B42BC?style=flat-square&logo=terraform&logoColor=white)
+![Ansible](https://img.shields.io/badge/Ansible-EE0000?style=flat-square&logo=ansible&logoColor=white)
+![AWS EC2](https://img.shields.io/badge/AWS_EC2-232F3E?style=flat-square)
+![Trivy](https://img.shields.io/badge/scanned_by-Trivy-1904DA?style=flat-square&logo=trivy&logoColor=white)
+
 A small Django application packaged as a Docker image. It is the application part of a DevOps assignment: the image is published to GitHub Container Registry and deployed in two ways:
 
 - to a Kubernetes cluster with Helm and Argo CD (see [django-gitops](https://github.com/filooww/django-gitops));
@@ -27,7 +46,10 @@ django-app/
 ├── ansible/                    # EC2 configuration: PostgreSQL, Docker, Django, CloudWatch Agent
 ├── .github/workflows/
 │   ├── ci.yml                  # Gitflow pipeline: lint, test, scan, push vX.Y.Z
-│   └── build-push.yaml         # push to main: image :latest and :<sha>
+│   ├── build-push.yaml         # push to main: image :latest and :<sha>
+│   ├── iac.yml                 # PR checks for terraform/ and ansible/
+│   └── badges.yml              # pipeline time and CVE count for the README badges
+├── scripts/put-badge.sh        # writes one badge JSON to the badges branch
 ├── Dockerfile
 ├── docker-compose.yaml         # local run: PostgreSQL + migrations + app + nginx
 ├── .env.example                # example settings

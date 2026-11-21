@@ -1,0 +1,72 @@
+name: Badges
+
+on:
+  workflow_run:
+    workflows: ["CI", "Build and push"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency: badges
+
+jobs:
+  badges:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BADGE_REPO: ${{ github.repository }}
+      IMAGE: ghcr.io/${{ github.repository_owner }}/django-app:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create the badges branch on first run
+        run: |
+          if ! git ls-remote --exit-code --heads origin badges > /dev/null; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git switch --orphan badges
+            git commit --allow-empty -m "Badge data for README"
+            git push origin badges
+            git switch -
+          fi
+
+      - name: Pipeline duration for the latest commit on main
+        run: |
+          sha=$(gh api "repos/$BADGE_REPO/commits/main" -q .sha)
+          runs=$(gh api "repos/$BADGE_REPO/actions/runs?head_sha=$sha&per_page=50" \
+            -q '[.workflow_runs[] | select(.name == "CI" or .name == "Build and push")]')
+          read -r seconds status <<< "$(jq -r '
+            if length == 0 then "0 none" else
+            ((map(.updated_at | fromdateiso8601) | max) - (map(.run_started_at | fromdateiso8601) | min)) as $d
+            | (if any(.[]; .status != "completed") then "running"
+               elif all(.[]; .conclusion == "success") then "success" else "failure" end) as $s
+            | "\($d) \($s)" end' <<< "$runs")"
+          message="$((seconds / 60))m $((seconds % 60))s"
+          case "$status" in
+            success) color=brightgreen ;;
+            running) color=blue; message="running" ;;
+            none) color=lightgrey; message="no runs" ;;
+            *) color=red; message="failed" ;;
+          esac
+          scripts/put-badge.sh pipeline.json pipeline "$message" "$color" githubactions
+
+      - name: Scan the published image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}
+          format: json
+          output: trivy.json
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+
+      - name: CVE badge
+        run: |
+          vulns='[.Results[]?.Vulnerabilities[]?]'
+          fixable=$(jq "$vulns | map(select((.FixedVersion // \"\") != \"\")) | length" trivy.json)
+          unfixed=$(jq "$vulns | map(select((.FixedVersion // \"\") == \"\")) | length" trivy.json)
+          critical=$(jq "$vulns | map(select(.Severity == \"CRITICAL\")) | length" trivy.json)
+          if [ "$critical" -gt 0 ] || [ "$fixable" -gt 0 ]; then color=red; else color=brightgreen; fi
+          scripts/put-badge.sh cve.json "HIGH+ CVE" "$fixable fixable · $unfixed no patch yet" "$color" trivy
