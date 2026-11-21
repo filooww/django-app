@@ -21,6 +21,11 @@ variable "app_allowed_cidrs" {
   default = []
 }
 
+variable "enable_ssh" {
+  type    = bool
+  default = false
+}
+
 variable "app_port" {
   type    = number
   default = 8000

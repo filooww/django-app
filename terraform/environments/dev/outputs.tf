@@ -7,7 +7,15 @@ output "availability_zone" {
 }
 
 output "django_public_ip" {
-  value = module.django.public_ip
+  value = aws_eip.django.public_ip
+}
+
+output "django_instance_id" {
+  value = module.django.id
+}
+
+output "postgres_instance_id" {
+  value = module.postgres.id
 }
 
 output "django_private_ip" {
@@ -35,17 +43,17 @@ output "aws_region" {
 }
 
 output "django_url" {
-  value = "http://${module.django.public_ip}:8000/"
+  value = "http://${aws_eip.django.public_ip}:8000/"
 }
 
 output "health_url" {
-  value = "http://${module.django.public_ip}:8000/health/"
+  value = "http://${aws_eip.django.public_ip}:8000/health/"
 }
 
-output "ssh_django" {
-  value = "ssh -i ~/.ssh/${var.key_name}.pem ubuntu@${module.django.public_ip}"
+output "ssm_django" {
+  value = "aws ssm start-session --target ${module.django.id} --profile ${var.aws_profile}"
 }
 
-output "ssh_postgres" {
-  value = "ssh -i ~/.ssh/${var.key_name}.pem ubuntu@${module.postgres.public_ip}"
+output "ssm_postgres" {
+  value = "aws ssm start-session --target ${module.postgres.id} --profile ${var.aws_profile}"
 }

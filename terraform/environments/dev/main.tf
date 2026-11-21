@@ -40,6 +40,7 @@ module "security_groups" {
   vpc_id            = module.vpc.vpc_id
   admin_cidr        = var.admin_cidr
   app_allowed_cidrs = var.app_allowed_cidrs
+  enable_ssh        = var.enable_ssh
 }
 
 # IAM
@@ -55,41 +56,66 @@ data "aws_iam_policy_document" "ec2_assume" {
   }
 }
 
+locals {
+  ec2_roles = toset(["django", "postgres"])
+}
+
 resource "aws_iam_role" "ec2" {
-  name               = "${local.name}-ec2"
+  for_each = local.ec2_roles
+
+  name               = "${local.name}-${each.key}"
   assume_role_policy = data.aws_iam_policy_document.ec2_assume.json
 }
 
 resource "aws_iam_role_policy_attachment" "cloudwatch_agent" {
-  role       = aws_iam_role.ec2.name
+  for_each = local.ec2_roles
+
+  role       = aws_iam_role.ec2[each.key].name
   policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
 }
 
 resource "aws_iam_role_policy_attachment" "ssm_core" {
-  count = var.enable_ssm ? 1 : 0
+  for_each = var.enable_ssm ? local.ec2_roles : toset([])
 
-  role       = aws_iam_role.ec2.name
+  role       = aws_iam_role.ec2[each.key].name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
 data "aws_caller_identity" "current" {}
 
 data "aws_iam_policy_document" "parameter_store" {
+  for_each = local.ec2_roles
+
   statement {
     actions   = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"]
-    resources = ["arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project}/${var.environment}/*"]
+    resources = ["arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project}/${var.environment}/${each.key}/*"]
+  }
+
+  # AmazonSSMManagedInstanceCore allows ssm:GetParameter on "*"; an explicit deny keeps each server out of the other's prefix
+  statement {
+    effect  = "Deny"
+    actions = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"]
+    resources = [
+      for role in local.ec2_roles :
+      "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project}/${var.environment}/${role}/*"
+      if role != each.key
+    ]
   }
 }
 
 resource "aws_iam_role_policy" "parameter_store" {
+  for_each = local.ec2_roles
+
   name   = "parameter-store-read"
-  role   = aws_iam_role.ec2.id
-  policy = data.aws_iam_policy_document.parameter_store.json
+  role   = aws_iam_role.ec2[each.key].id
+  policy = data.aws_iam_policy_document.parameter_store[each.key].json
 }
 
 resource "aws_iam_instance_profile" "ec2" {
-  name = "${local.name}-ec2"
-  role = aws_iam_role.ec2.name
+  for_each = local.ec2_roles
+
+  name = "${local.name}-${each.key}"
+  role = aws_iam_role.ec2[each.key].name
 }
 
 # Compute
@@ -102,9 +128,16 @@ module "django" {
   instance_type         = var.django_instance_type
   subnet_id             = module.vpc.public_subnet_id
   security_group_ids    = [module.security_groups.django_sg_id]
-  instance_profile_name = aws_iam_instance_profile.ec2.name
+  instance_profile_name = aws_iam_instance_profile.ec2["django"].name
   key_name              = var.key_name
   tags                  = { Role = "django" }
+}
+
+resource "aws_eip" "django" {
+  domain   = "vpc"
+  instance = module.django.id
+
+  tags = { Name = "${local.name}-django" }
 }
 
 module "postgres" {
@@ -115,7 +148,7 @@ module "postgres" {
   instance_type         = var.postgres_instance_type
   subnet_id             = module.vpc.public_subnet_id
   security_group_ids    = [module.security_groups.postgres_sg_id]
-  instance_profile_name = aws_iam_instance_profile.ec2.name
+  instance_profile_name = aws_iam_instance_profile.ec2["postgres"].name
   key_name              = var.key_name
   tags                  = { Role = "postgres" }
 }
