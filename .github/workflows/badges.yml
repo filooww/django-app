@@ -30,7 +30,7 @@ jobs:
             git switch --orphan badges
             git commit --allow-empty -m "Badge data for README"
             git push origin badges
-            git switch -
+            git checkout --quiet "$GITHUB_SHA"
           fi
 
       - name: Pipeline duration for the latest commit on main
