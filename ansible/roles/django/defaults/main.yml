@@ -8,3 +8,4 @@ django_db_ca_file: "{{ django_dir }}/postgres-ca.crt"
 django_db_ca_in_container: /etc/postgres-ca/ca.crt
 django_db_ca_source: /etc/ssl/certs/ssl-cert-snakeoil.pem
 django_db_sslmode: verify-ca
+django_badge_report: true

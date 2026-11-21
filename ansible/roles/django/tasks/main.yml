@@ -112,3 +112,20 @@
 - name: Show result
   ansible.builtin.debug:
     msg: "Deployed {{ django_image }}:{{ django_image_tag }} -> http://{{ public_ip }}:{{ django_port }}/ ({{ django_root.json }})"
+
+- name: Publish the deployed version to the README badge
+  ansible.builtin.command: >-
+    {{ playbook_dir }}/../../scripts/put-badge.sh ec2.json ec2
+    "{{ django_image_tag }} · {{ '%Y-%m-%d' | strftime }}" blue
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: django_badge
+  changed_when: "'updated' in django_badge.stdout"
+  failed_when: false
+  when: django_badge_report | bool
+
+- name: Show badge result
+  ansible.builtin.debug:
+    msg: "{{ django_badge.stdout | default(django_badge.stderr | default('skipped')) }}"
+  when: django_badge_report | bool
