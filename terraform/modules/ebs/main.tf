@@ -4,7 +4,7 @@ resource "aws_ebs_volume" "this" {
   size              = var.size
   encrypted         = true
 
-  tags = { Name = var.name }
+  tags = merge(var.tags, { Name = var.name })
 }
 
 resource "aws_volume_attachment" "this" {

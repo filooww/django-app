@@ -17,6 +17,8 @@ resource "aws_security_group" "postgres" {
 # Django inbound
 
 resource "aws_vpc_security_group_ingress_rule" "django_ssh" {
+  count = var.enable_ssh ? 1 : 0
+
   security_group_id = aws_security_group.django.id
   description       = "SSH from admin"
   cidr_ipv4         = var.admin_cidr
@@ -77,6 +79,8 @@ resource "aws_vpc_security_group_ingress_rule" "postgres_from_django" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "postgres_ssh" {
+  count = var.enable_ssh ? 1 : 0
+
   security_group_id = aws_security_group.postgres.id
   description       = "SSH from admin"
   cidr_ipv4         = var.admin_cidr

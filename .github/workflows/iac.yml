@@ -1,0 +1,74 @@
+name: IaC checks
+
+on:
+  pull_request:
+    branches: [develop, main]
+    paths: ["terraform/**", "ansible/**", ".trivyignore", ".github/workflows/iac.yml"]
+  push:
+    branches: [develop]
+    paths: ["terraform/**", "ansible/**", ".trivyignore", ".github/workflows/iac.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.4
+
+      - name: Format
+        run: terraform fmt -check -recursive -diff terraform
+
+      - name: Validate
+        run: |
+          for dir in terraform/bootstrap terraform/environments/dev; do
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+          done
+
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.59.1
+
+      - name: TFLint
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          tflint --chdir=terraform --init --config="$PWD/terraform/.tflint.hcl"
+          for dir in terraform/bootstrap terraform/environments/dev terraform/modules/*; do
+            tflint --chdir="$dir" --config="$PWD/terraform/.tflint.hcl"
+          done
+
+      - name: Trivy misconfiguration scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: terraform
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          trivyignores: .trivyignore
+
+  ansible:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ansible-lint and collections
+        run: |
+          pip install ansible-lint
+          ansible-galaxy collection install -r ansible/requirements.yml
+
+      - name: Lint
+        working-directory: ansible
+        run: |
+          echo "lint-only" > "$RUNNER_TEMP/vault-pass"
+          ANSIBLE_VAULT_PASSWORD_FILE="$RUNNER_TEMP/vault-pass" ansible-lint --offline playbooks/ roles/

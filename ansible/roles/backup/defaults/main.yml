@@ -1,0 +1,4 @@
+backup_dir: /var/backups/postgresql
+backup_keep_local_days: 3
+backup_schedule: "*-*-* 02:30:00"
+backup_s3_prefix: postgres

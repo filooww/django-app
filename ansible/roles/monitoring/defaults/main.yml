@@ -3,7 +3,7 @@ monitoring_arch_map:
   aarch64: arm64
 monitoring_agent_base_url: https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu
 monitoring_agent_url: "{{ monitoring_agent_base_url }}/{{ monitoring_arch_map[ansible_architecture] }}/latest/amazon-cloudwatch-agent.deb"
-monitoring_agent_config: /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+monitoring_agent_config: /etc/amazon-cloudwatch-agent/config.json
 monitoring_interval: 60
 monitoring_log_group_prefix: "/{{ project_name }}/{{ inventory_hostname }}"
 monitoring_disk_paths:

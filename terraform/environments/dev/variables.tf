@@ -60,6 +60,12 @@ variable "postgres_data_volume_size" {
   default = 20
 }
 
+variable "enable_ssh" {
+  type        = bool
+  default     = false
+  description = "Open port 22 to admin_cidr. Off by default: admin access goes through SSM Session Manager"
+}
+
 variable "enable_ssm" {
   type    = bool
   default = true
@@ -69,6 +75,16 @@ variable "alarm_email" {
   type        = string
   default     = ""
   description = "Email for CloudWatch alarm notifications, empty disables SNS"
+}
+
+variable "snapshot_retain_count" {
+  type    = number
+  default = 7
+}
+
+variable "backup_retention_days" {
+  type    = number
+  default = 14
 }
 
 variable "cpu_alarm_threshold" {
