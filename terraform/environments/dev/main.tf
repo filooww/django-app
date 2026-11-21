@@ -90,6 +90,17 @@ data "aws_iam_policy_document" "parameter_store" {
     actions   = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"]
     resources = ["arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project}/${var.environment}/${each.key}/*"]
   }
+
+  # AmazonSSMManagedInstanceCore allows ssm:GetParameter on "*"; an explicit deny keeps each server out of the other's prefix
+  statement {
+    effect  = "Deny"
+    actions = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"]
+    resources = [
+      for role in local.ec2_roles :
+      "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project}/${var.environment}/${role}/*"
+      if role != each.key
+    ]
+  }
 }
 
 resource "aws_iam_role_policy" "parameter_store" {
