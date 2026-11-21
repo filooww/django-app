@@ -127,4 +127,5 @@ module "postgres_data" {
   availability_zone = module.postgres.availability_zone
   instance_id       = module.postgres.id
   size              = var.postgres_data_volume_size
+  tags              = { Snapshot = "${local.name}-postgres-data" }
 }

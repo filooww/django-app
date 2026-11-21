@@ -26,6 +26,14 @@ output "postgres_data_volume_id" {
   value = module.postgres_data.volume_id
 }
 
+output "backup_bucket" {
+  value = aws_s3_bucket.backups.bucket
+}
+
+output "aws_region" {
+  value = var.aws_region
+}
+
 output "django_url" {
   value = "http://${module.django.public_ip}:8000/"
 }

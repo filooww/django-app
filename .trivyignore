@@ -1,0 +1,12 @@
+# Accepted findings for the AWS EC2 deployment (terraform/). Each one follows from the assignment or a deliberate cost choice.
+
+# Egress 0.0.0.0/0: Django needs 443 (GHCR, Docker apt repo, CloudWatch, SSM) and 80 (Ubuntu apt mirrors);
+# PostgreSQL needs package updates and CloudWatch. No NAT or VPC endpoints in this setup.
+AVD-AWS-0104
+
+# Public subnet with auto-assigned public IPs: the assignment places both EC2 instances in a public subnet.
+AVD-AWS-0164
+
+# SSE-S3 (AES256) instead of a customer managed KMS key: state and backups are encrypted at rest; a CMK adds cost
+# and key management without changing who can read the data in a single-account lab.
+AVD-AWS-0132
