@@ -1,0 +1,47 @@
+- name: Check that the backup bucket is known
+  ansible.builtin.assert:
+    that: backup_bucket is defined and backup_bucket | length > 0
+    fail_msg: "backup_bucket is missing, regenerate the inventory from Terraform outputs"
+    quiet: true
+
+- name: Install S3 client library
+  ansible.builtin.apt:
+    name: python3-boto3
+    state: present
+
+- name: Create local backup directory
+  ansible.builtin.file:
+    path: "{{ backup_dir }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: "0700"
+
+- name: Install backup script
+  ansible.builtin.template:
+    src: pg-backup.sh.j2
+    dest: /usr/local/bin/pg-backup
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install systemd service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - pg-backup.service
+    - pg-backup.timer
+  notify: Reload systemd
+
+- name: Apply systemd changes now
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable backup timer
+  ansible.builtin.systemd_service:
+    name: pg-backup.timer
+    state: started
+    enabled: true

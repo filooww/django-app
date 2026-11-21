@@ -5,6 +5,11 @@ max_connections = {{ postgresql_max_connections }}
 shared_buffers = {{ postgresql_shared_buffers }}
 password_encryption = scram-sha-256
 
+ssl = on
+ssl_cert_file = '{{ postgresql_ssl_cert_file }}'
+ssl_key_file = '{{ postgresql_ssl_key_file }}'
+ssl_min_protocol_version = 'TLSv1.2'
+
 log_connections = on
 log_disconnections = on
 log_min_duration_statement = 500

@@ -15,6 +15,11 @@ variable "size" {
   default = 20
 }
 
+variable "tags" {
+  type    = map(string)
+  default = {}
+}
+
 variable "device_name" {
   type    = string
   default = "/dev/sdf"

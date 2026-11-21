@@ -71,6 +71,16 @@ variable "alarm_email" {
   description = "Email for CloudWatch alarm notifications, empty disables SNS"
 }
 
+variable "snapshot_retain_count" {
+  type    = number
+  default = 7
+}
+
+variable "backup_retention_days" {
+  type    = number
+  default = 14
+}
+
 variable "cpu_alarm_threshold" {
   type    = number
   default = 80

@@ -14,7 +14,7 @@ jq -r --arg key "$KEY_FILE" '
 django-server ansible_host=\(.django_public_ip.value) private_ip=\(.django_private_ip.value)
 
 [database]
-postgres-server ansible_host=\(.postgres_public_ip.value) private_ip=\(.postgres_private_ip.value) ebs_volume_id=\(.postgres_data_volume_id.value)
+postgres-server ansible_host=\(.postgres_public_ip.value) private_ip=\(.postgres_private_ip.value) ebs_volume_id=\(.postgres_data_volume_id.value) backup_bucket=\(.backup_bucket.value) aws_region=\(.aws_region.value)
 
 [all:vars]
 ansible_user=ubuntu

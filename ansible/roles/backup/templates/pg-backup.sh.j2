@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Managed by Ansible: dumps the application database and uploads it to S3.
+set -euo pipefail
+
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+file="{{ backup_dir }}/{{ db_name }}-${stamp}.dump"
+
+runuser -u postgres -- pg_dump --format=custom --file="$file" {{ db_name }}
+
+python3 - "$file" <<'PY'
+import os, sys, boto3
+path = sys.argv[1]
+key = "{{ backup_s3_prefix }}/{{ inventory_hostname }}/" + os.path.basename(path)
+boto3.client("s3", region_name="{{ aws_region }}").upload_file(path, "{{ backup_bucket }}", key)
+print(f"uploaded s3://{{ backup_bucket }}/{key}")
+PY
+
+find "{{ backup_dir }}" -name '*.dump' -mtime +{{ backup_keep_local_days }} -delete

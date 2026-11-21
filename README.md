@@ -239,6 +239,37 @@ The `django` role pulls the image, runs `python manage.py migrate --noinput` in 
 - The EBS volume is a separate resource: replacing the EC2 instance keeps the volume and its data. `terraform destroy` deletes it, take a snapshot first if the data matters.
 - PostgreSQL listens on localhost and the private IP; `pg_hba.conf` allows only the Django host's private IP for the application database.
 
+### Security checks and hardening
+
+| Area | What is in place |
+|---|---|
+| IaC checks (`iac.yml`) | every PR touching `terraform/` or `ansible/`: `terraform fmt` and `validate`, TFLint with the AWS ruleset, Trivy misconfiguration scan (HIGH and CRITICAL fail the build), `ansible-lint` (production profile) |
+| Accepted findings | listed with reasons in `.trivyignore`: open egress for GHCR and apt, public subnet required by the assignment, SSE-S3 instead of a KMS key |
+| Image | `build-push.yaml` scans the image with Trivy before pushing; a HIGH or CRITICAL fixable CVE stops the push |
+| Django → PostgreSQL | TLS only: `hostssl` in `pg_hba.conf`, the client uses `PGSSLMODE=verify-ca` and trusts only the database server certificate, copied by Ansible |
+| AWS access | no long-lived access keys: `aws login` sessions; EC2 uses an instance profile with IMDSv2 |
+
+### Backups
+
+| Type | How | Retention |
+|---|---|---|
+| EBS snapshots of the data volume | Data Lifecycle Manager, daily at 01:00 UTC, volumes tagged `Snapshot=devops-aws-dev-postgres-data` | last 7 |
+| Logical dump | `pg-backup.timer` on the database host runs `pg_dump --format=custom` daily and uploads to `s3://devops-aws-dev-backups-<account-id>/postgres/` | 14 days (S3 lifecycle) |
+
+The instance role may only `PutObject` under `postgres/`; the bucket denies non-TLS requests.
+
+Run a backup now and restore it:
+
+```bash
+ssh -i ~/.ssh/aws-key.pem ubuntu@$(terraform -chdir=terraform/environments/dev output -raw postgres_public_ip) 'sudo systemctl start pg-backup.service && sudo journalctl -u pg-backup -n 5 --no-pager'
+aws s3 ls s3://$(terraform -chdir=terraform/environments/dev output -raw backup_bucket)/postgres/ --recursive --profile devops
+```
+
+```bash
+# on the database host: restore the newest local dump
+sudo -u postgres sh -c 'pg_restore --clean --if-exists --dbname=django "$(ls -t /var/backups/postgresql/*.dump | head -1)"'
+```
+
 ### Destroy
 
 ```bash

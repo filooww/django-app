@@ -24,6 +24,20 @@
     mode: "0600"
   diff: false
 
+- name: Read the PostgreSQL server certificate
+  ansible.builtin.slurp:
+    src: "{{ django_db_ca_source }}"
+  delegate_to: "{{ groups['database'][0] }}"
+  register: django_db_ca
+
+- name: Trust only this certificate for database connections
+  ansible.builtin.copy:
+    content: "{{ django_db_ca.content | b64decode }}"
+    dest: "{{ django_db_ca_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+
 - name: Pull image from GHCR
   community.docker.docker_image:
     name: "{{ django_image }}"
@@ -34,6 +48,7 @@
   ansible.builtin.command: >-
     docker run --rm
     --env-file {{ django_env_file }}
+    -v {{ django_db_ca_file }}:{{ django_db_ca_in_container }}:ro
     {{ django_image }}:{{ django_image_tag }}
     python manage.py migrate --noinput
   register: django_migrate
@@ -46,6 +61,8 @@
     state: started
     restart_policy: unless-stopped
     env_file: "{{ django_env_file }}"
+    volumes:
+      - "{{ django_db_ca_file }}:{{ django_db_ca_in_container }}:ro"
     published_ports:
       - "{{ django_port }}:8000"
     healthcheck:
