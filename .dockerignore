@@ -11,3 +11,7 @@ docker-compose.yml
 *.png
 .env.dev
 .env.prod
+terraform/
+ansible/
+.github/
+*.pem

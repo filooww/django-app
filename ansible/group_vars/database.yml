@@ -1,0 +1,15 @@
+postgresql_version: "16"
+postgresql_data_mount: /var/lib/postgresql
+postgresql_listen_addresses: "localhost,{{ private_ip }}"
+postgresql_shared_buffers: 512MB
+django_client_ip: "{{ hostvars[groups['django'][0]]['private_ip'] }}"
+
+ebs_mount_point: "{{ postgresql_data_mount }}"
+ebs_fstype: ext4
+
+monitoring_disk_paths:
+  - /
+  - /var/lib/postgresql
+monitoring_extra_logs:
+  - name: postgresql
+    path: "/var/log/postgresql/postgresql-{{ postgresql_version }}-main.log"

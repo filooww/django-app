@@ -1,0 +1,4 @@
+ebs_mount_point: /var/lib/postgresql
+ebs_fstype: ext4
+ebs_mount_opts: defaults,nofail
+ebs_verify_reboot: true
