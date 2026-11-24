@@ -1,0 +1,84 @@
+- name: Create postgres_exporter system user
+  ansible.builtin.user:
+    name: "{{ postgres_exporter_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+# pg_monitor is a built-in read-only role for monitoring views (pg_stat_*, pg_settings)
+- name: Create database role for the exporter
+  community.postgresql.postgresql_user:
+    name: "{{ postgres_exporter_user }}"
+    role_attr_flags: LOGIN
+  become: true
+  become_user: postgres
+
+- name: Grant pg_monitor to the exporter
+  community.postgresql.postgresql_membership:
+    target_roles: ["{{ postgres_exporter_user }}"]
+    memberships:
+      - groups: pg_monitor
+    state: present
+  become: true
+  become_user: postgres
+
+- name: Check installed postgres_exporter version
+  ansible.builtin.command: "{{ postgres_exporter_binary }} --version"
+  register: postgres_exporter_installed
+  changed_when: false
+  failed_when: false
+
+- name: Install postgres_exporter {{ postgres_exporter_version }}
+  when: ("version " + postgres_exporter_version) not in (postgres_exporter_installed.stderr | default('') + postgres_exporter_installed.stdout | default(''))
+  block:
+    - name: Download postgres_exporter release and verify its checksum
+      ansible.builtin.get_url:
+        url: "{{ postgres_exporter_release_url }}/{{ postgres_exporter_archive }}.tar.gz"
+        dest: "/tmp/{{ postgres_exporter_archive }}.tar.gz"
+        checksum: "sha256:{{ postgres_exporter_release_url }}/sha256sums.txt"
+        mode: "0644"
+
+    - name: Unpack postgres_exporter
+      ansible.builtin.unarchive:
+        src: "/tmp/{{ postgres_exporter_archive }}.tar.gz"
+        dest: /tmp
+        remote_src: true
+
+    - name: Install postgres_exporter binary
+      ansible.builtin.copy:
+        src: "/tmp/{{ postgres_exporter_archive }}/postgres_exporter"
+        dest: "{{ postgres_exporter_binary }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
+      notify: Restart postgres_exporter
+
+- name: Write postgres_exporter systemd unit
+  ansible.builtin.template:
+    src: postgres_exporter.service.j2
+    dest: /etc/systemd/system/postgres_exporter.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart postgres_exporter
+
+- name: Enable and start postgres_exporter
+  ansible.builtin.systemd_service:
+    name: postgres_exporter
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Apply changes now
+  ansible.builtin.meta: flush_handlers
+
+- name: Check that the exporter can reach PostgreSQL (pg_up 1)
+  ansible.builtin.uri:
+    url: "http://{{ postgres_exporter_listen }}/metrics"
+    return_content: true
+  register: postgres_exporter_metrics
+  failed_when: postgres_exporter_metrics.content is not search("^pg_up 1", multiline=True)
+  retries: 5
+  delay: 3
+  until: postgres_exporter_metrics is succeeded

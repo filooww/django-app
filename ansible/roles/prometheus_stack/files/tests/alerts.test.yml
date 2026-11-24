@@ -1,0 +1,100 @@
+# promtool test rules tests/alerts.test.yml
+# Fake time series go in, the test checks which alerts fire at a given moment.
+rule_files:
+  - ../rules/node.yml
+  - ../rules/postgres.yml
+  - ../rules/application.yml
+
+evaluation_interval: 15s
+
+tests:
+  - name: CPU at 95% fires HighCpuUsage after the 2 minute "for"
+    interval: 15s
+    input_series:
+      # idle grows by 0.75 s every 15 s -> 5% idle -> 95% busy
+      - series: 'node_cpu_seconds_total{instance="django",cpu="0",mode="idle"}'
+        values: '0+0.75x40'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: HighCpuUsage
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: HighCpuUsage
+        exp_alerts:
+          - exp_labels: { instance: django, severity: warning }
+            exp_annotations:
+              summary: "High CPU usage on django"
+              description: "CPU usage is 95% (threshold 80%) for 2 minutes."
+
+  - name: 10% free disk fires LowDiskSpace but not DiskSpaceCritical
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{instance="postgres",mountpoint="/var/lib/postgresql",fstype="ext4"}'
+        values: '10x5'
+      - series: 'node_filesystem_size_bytes{instance="postgres",mountpoint="/var/lib/postgresql",fstype="ext4"}'
+        values: '100x5'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: LowDiskSpace
+        exp_alerts:
+          - exp_labels: { instance: postgres, mountpoint: /var/lib/postgresql, fstype: ext4, severity: warning }
+            exp_annotations:
+              summary: "Low disk space on postgres:/var/lib/postgresql"
+              description: "Only 10.0% free (threshold 15%)."
+      - eval_time: 3m
+        alertname: DiskSpaceCritical
+        exp_alerts: []
+
+  - name: tmpfs is ignored by disk alerts
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{instance="django",mountpoint="/run",fstype="tmpfs"}'
+        values: '1x5'
+      - series: 'node_filesystem_size_bytes{instance="django",mountpoint="/run",fstype="tmpfs"}'
+        values: '100x5'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: DiskSpaceCritical
+        exp_alerts: []
+
+  - name: unreachable exporter fires TargetDown
+    interval: 15s
+    input_series:
+      - series: 'up{job="node",instance="postgres"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: TargetDown
+        exp_alerts:
+          - exp_labels: { job: node, instance: postgres, severity: critical }
+            exp_annotations:
+              summary: "node on postgres is down"
+              description: "Prometheus cannot scrape node on postgres for more than 1 minute."
+
+  - name: database down fires PostgresDown
+    interval: 15s
+    input_series:
+      - series: 'pg_up{instance="postgres"}'
+        values: '1 1 0 0 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: PostgresDown
+        exp_alerts:
+          - exp_labels: { instance: postgres, severity: critical }
+            exp_annotations:
+              summary: "PostgreSQL on postgres is not responding"
+              description: "postgres_exporter is running but cannot connect to the database."
+
+  - name: failing health check fires EndpointDown
+    interval: 15s
+    input_series:
+      - series: 'probe_success{job="blackbox-http",instance="http://10.0.1.10:8000/health/"}'
+        values: '0x12'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: EndpointDown
+        exp_alerts:
+          - exp_labels: { job: blackbox-http, instance: "http://10.0.1.10:8000/health/", severity: critical }
+            exp_annotations:
+              summary: "HTTP check failed: http://10.0.1.10:8000/health/"
+              description: "The endpoint has not returned 2xx for 2 minutes."

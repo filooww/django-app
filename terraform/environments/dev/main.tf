@@ -57,7 +57,7 @@ data "aws_iam_policy_document" "ec2_assume" {
 }
 
 locals {
-  ec2_roles = toset(["django", "postgres"])
+  ec2_roles = toset(["django", "postgres", "monitoring"])
 }
 
 resource "aws_iam_role" "ec2" {
@@ -111,6 +111,21 @@ resource "aws_iam_role_policy" "parameter_store" {
   policy = data.aws_iam_policy_document.parameter_store[each.key].json
 }
 
+# Prometheus EC2 service discovery lists instances to find scrape targets.
+# DescribeInstances does not support resource-level permissions, so the resource is "*".
+data "aws_iam_policy_document" "ec2_discovery" {
+  statement {
+    actions   = ["ec2:DescribeInstances", "ec2:DescribeAvailabilityZones"]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "ec2_discovery" {
+  name   = "ec2-service-discovery"
+  role   = aws_iam_role.ec2["monitoring"].id
+  policy = data.aws_iam_policy_document.ec2_discovery.json
+}
+
 resource "aws_iam_instance_profile" "ec2" {
   for_each = local.ec2_roles
 
@@ -161,4 +176,20 @@ module "postgres_data" {
   instance_id       = module.postgres.id
   size              = var.postgres_data_volume_size
   tags              = { Snapshot = "${local.name}-postgres-data" }
+}
+
+module "monitoring" {
+  source = "../../modules/ec2"
+
+  name                  = "${local.name}-monitoring"
+  ami_id                = data.aws_ami.ubuntu.id
+  instance_type         = var.monitoring_instance_type
+  subnet_id             = module.vpc.public_subnet_id
+  security_group_ids    = [module.security_groups.monitoring_sg_id]
+  instance_profile_name = aws_iam_instance_profile.ec2["monitoring"].name
+  key_name              = var.key_name
+  root_volume_size      = var.monitoring_root_volume_size
+  # Prometheus runs in a Docker bridge network: one extra hop to reach IMDS for EC2 discovery
+  metadata_hop_limit = 2
+  tags               = { Role = "monitoring" }
 }

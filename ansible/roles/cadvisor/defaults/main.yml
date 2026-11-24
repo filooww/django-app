@@ -1,0 +1,3 @@
+cadvisor_image: gcr.io/cadvisor/cadvisor:v0.55.1
+cadvisor_listen_ip: "{{ private_ip }}"
+cadvisor_port: 8080

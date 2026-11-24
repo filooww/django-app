@@ -1,0 +1,24 @@
+# Managed by Ansible
+[Unit]
+Description=Prometheus node_exporter
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User={{ node_exporter_user }}
+Group={{ node_exporter_user }}
+ExecStart={{ node_exporter_binary }} \
+  --web.listen-address={{ node_exporter_listen }} \
+{% for collector in node_exporter_collectors %}
+  --collector.{{ collector }} \
+{% endfor %}
+  --collector.filesystem.mount-points-exclude={{ node_exporter_fs_exclude }}
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

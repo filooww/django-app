@@ -1,0 +1,86 @@
+# Managed by Ansible
+global:
+  scrape_interval: {{ prometheus_stack_scrape_interval }}
+  evaluation_interval: {{ prometheus_stack_scrape_interval }}
+  external_labels:
+    project: {{ project_name }}
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: [alertmanager:9093]
+
+scrape_configs:
+  # The monitoring stack itself (containers in the same Docker network)
+  - job_name: prometheus
+    static_configs:
+      - targets: [localhost:9090]
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: [alertmanager:9093]
+
+  - job_name: grafana
+    static_configs:
+      - targets: [grafana:3000]
+
+  - job_name: blackbox-exporter
+    static_configs:
+      - targets: [blackbox-exporter:9115]
+
+  # EC2 service discovery: Prometheus asks the EC2 API which instances exist and scrapes their private IPs.
+  # A new server with the right tags is picked up without editing this file.
+{% for job in [
+  {'name': 'node', 'port': 9100, 'role': ''},
+  {'name': 'postgres', 'port': 9187, 'role': 'postgres'},
+  {'name': 'cadvisor', 'port': 8080, 'role': 'django'},
+] %}
+  - job_name: {{ job.name }}
+    ec2_sd_configs:
+      - region: {{ prometheus_stack_aws_region }}
+        port: {{ job.port }}
+        refresh_interval: 60s
+        filters:
+          - name: tag:Project
+            values: [{{ prometheus_stack_ec2_project_tag }}]
+          - name: instance-state-name
+            values: [running]
+{% if job.role %}
+          - name: tag:Role
+            values: [{{ job.role }}]
+{% endif %}
+    relabel_configs:
+      # Readable labels from EC2 tags instead of ip:port
+      - source_labels: [__meta_ec2_tag_Name]
+        target_label: instance
+      - source_labels: [__meta_ec2_tag_Role]
+        target_label: role
+      - source_labels: [__meta_ec2_instance_id]
+        target_label: instance_id
+      - source_labels: [__meta_ec2_availability_zone]
+        target_label: az
+
+{% endfor %}
+  # Blackbox: Prometheus asks the exporter to probe a URL and gets probe_success 0/1 and timings.
+  # Relabeling moves the URL into ?target= and sends the scrape to the exporter.
+  - job_name: blackbox-http
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+{% for url in prometheus_stack_http_probes %}
+          - {{ url }}
+{% endfor %}
+        labels:
+          role: django
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

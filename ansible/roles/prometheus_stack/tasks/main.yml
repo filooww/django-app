@@ -1,0 +1,176 @@
+- name: Check required secrets
+  ansible.builtin.assert:
+    that:
+      - vault_grafana_admin_password is defined
+      - vault_grafana_admin_password | length >= 12
+    fail_msg: "Add vault_grafana_admin_password to group_vars/monitoring.yml with ansible-vault encrypt_string (see README)"
+    quiet: true
+
+- name: Create monitoring directories
+  ansible.builtin.file:
+    path: "{{ prometheus_stack_dir }}/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - ""
+    - prometheus
+    - prometheus/rules
+    - alertmanager
+    - blackbox
+    - grafana/provisioning/datasources
+    - grafana/provisioning/dashboards
+    - grafana/dashboards
+
+- name: Pull tool images used for config validation
+  community.docker.docker_image_pull:
+    name: "{{ item }}"
+  loop:
+    - "{{ prometheus_stack_prometheus_image }}"
+    - "{{ prometheus_stack_alertmanager_image }}"
+
+# validate: a broken file is never written, the running Prometheus keeps the old config
+- name: Write Prometheus configuration
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: "{{ prometheus_stack_dir }}/prometheus/prometheus.yml"
+    owner: root
+    group: root
+    mode: "0644"
+    validate: >-
+      docker run --rm --user 0 -v %s:/check.yml:ro --entrypoint promtool
+      {{ prometheus_stack_prometheus_image }} check config --syntax-only /check.yml
+  notify: Reload Prometheus
+
+- name: Copy alert rules
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ prometheus_stack_dir }}/prometheus/rules/"
+    owner: root
+    group: root
+    mode: "0644"
+    validate: >-
+      docker run --rm --user 0 -v %s:/check.yml:ro --entrypoint promtool
+      {{ prometheus_stack_prometheus_image }} check rules /check.yml
+  with_fileglob: rules/*.yml
+  notify: Reload Prometheus
+
+- name: Write Telegram bot token
+  ansible.builtin.copy:
+    content: "{{ prometheus_stack_telegram_bot_token }}"
+    dest: "{{ prometheus_stack_dir }}/alertmanager/telegram_token"
+    owner: "65534"
+    group: "65534"
+    mode: "0400"
+  no_log: true
+  when: prometheus_stack_telegram_bot_token | length > 0
+  notify: Reload Alertmanager
+
+- name: Write Alertmanager configuration
+  ansible.builtin.template:
+    src: alertmanager.yml.j2
+    dest: "{{ prometheus_stack_dir }}/alertmanager/alertmanager.yml"
+    owner: root
+    group: root
+    mode: "0644"
+    validate: >-
+      docker run --rm --user 0 -v %s:/check.yml:ro --entrypoint amtool
+      {{ prometheus_stack_alertmanager_image }} check-config /check.yml
+  notify: Reload Alertmanager
+
+- name: Copy blackbox exporter modules
+  ansible.builtin.copy:
+    src: blackbox.yml
+    dest: "{{ prometheus_stack_dir }}/blackbox/blackbox.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart monitoring stack
+
+- name: Copy Grafana provisioning
+  ansible.builtin.copy:
+    src: "grafana/provisioning/{{ item }}"
+    dest: "{{ prometheus_stack_dir }}/grafana/provisioning/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - datasources/datasources.yml
+    - dashboards/dashboards.yml
+  notify: Restart monitoring stack
+
+# Grafana re-reads dashboard files by itself (updateIntervalSeconds), no restart needed
+- name: Copy Grafana dashboards
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ prometheus_stack_dir }}/grafana/dashboards/"
+    owner: root
+    group: root
+    mode: "0644"
+  with_fileglob: grafana/dashboards/*.json
+
+- name: Write Grafana environment file
+  ansible.builtin.template:
+    src: grafana.env.j2
+    dest: "{{ prometheus_stack_dir }}/grafana.env"
+    owner: root
+    group: root
+    mode: "0600"
+  diff: false
+  notify: Restart monitoring stack
+
+- name: Write docker-compose.yml
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ prometheus_stack_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Start the monitoring stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ prometheus_stack_dir }}"
+    state: present
+    pull: missing
+    wait: true
+    wait_timeout: 180
+
+- name: Apply configuration changes now
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait until every scrape target is up
+  ansible.builtin.uri:
+    url: "http://{{ prometheus_stack_bind_ip }}:9090/api/v1/targets?state=active"
+    return_content: true
+  register: prometheus_stack_targets
+  until: >-
+    prometheus_stack_targets.json is defined
+    and (prometheus_stack_targets.json.data.activeTargets | length) > 0
+    and (prometheus_stack_targets.json.data.activeTargets | rejectattr('health', 'equalto', 'up') | list | length) == 0
+  retries: 20
+  delay: 6
+  failed_when: false
+
+- name: Show scrape targets
+  ansible.builtin.debug:
+    msg: "{{ prometheus_stack_pools | zip(prometheus_stack_instances, prometheus_stack_health) | map('join', ' | ') | list }}"
+  vars:
+    prometheus_stack_active: "{{ prometheus_stack_targets.json.data.activeTargets }}"
+    prometheus_stack_pools: "{{ prometheus_stack_active | map(attribute='scrapePool') }}"
+    prometheus_stack_instances: "{{ prometheus_stack_active | map(attribute='labels.instance') }}"
+    prometheus_stack_health: "{{ prometheus_stack_active | map(attribute='health') }}"
+
+- name: Fail if some targets are down
+  ansible.builtin.assert:
+    that: (prometheus_stack_targets.json.data.activeTargets | rejectattr('health', 'equalto', 'up') | list | length) == 0
+    fail_msg: "Some scrape targets are down, open Status -> Targets in Prometheus"
+    quiet: true
+
+- name: Check Grafana health
+  ansible.builtin.uri:
+    url: "http://{{ prometheus_stack_bind_ip }}:3000/api/health"
+  register: prometheus_stack_grafana
+  until: prometheus_stack_grafana is succeeded
+  retries: 10
+  delay: 3
