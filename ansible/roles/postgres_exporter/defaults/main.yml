@@ -1,0 +1,12 @@
+postgres_exporter_version: "0.20.1"
+postgres_exporter_arch_map:
+  x86_64: amd64
+  aarch64: arm64
+postgres_exporter_arch: "{{ postgres_exporter_arch_map[ansible_architecture] }}"
+postgres_exporter_release_url: "https://github.com/prometheus-community/postgres_exporter/releases/download/v{{ postgres_exporter_version }}"
+postgres_exporter_archive: "postgres_exporter-{{ postgres_exporter_version }}.linux-{{ postgres_exporter_arch }}"
+postgres_exporter_binary: /usr/local/bin/postgres_exporter
+# The same name is used for the Linux user and the database role: peer authentication over the unix socket, no password
+postgres_exporter_user: postgres_exporter
+postgres_exporter_listen: "{{ private_ip }}:9187"
+postgres_exporter_dsn: "host=/var/run/postgresql dbname=postgres user={{ postgres_exporter_user }} sslmode=disable"

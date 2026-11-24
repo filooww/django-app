@@ -57,3 +57,24 @@ output "ssm_django" {
 output "ssm_postgres" {
   value = "aws ssm start-session --target ${module.postgres.id} --profile ${var.aws_profile}"
 }
+
+output "monitoring_instance_id" {
+  value = module.monitoring.id
+}
+
+output "monitoring_private_ip" {
+  value = module.monitoring.private_ip
+}
+
+output "ssm_monitoring" {
+  value = "aws ssm start-session --target ${module.monitoring.id} --profile ${var.aws_profile}"
+}
+
+# Opens Grafana on http://localhost:3000 through SSM (Prometheus: 9090, Alertmanager: 9093)
+output "grafana_tunnel" {
+  value = "aws ssm start-session --target ${module.monitoring.id} --document-name AWS-StartPortForwardingSession --parameters portNumber=3000,localPortNumber=3000 --profile ${var.aws_profile}"
+}
+
+output "monitoring_public_ip" {
+  value = module.monitoring.public_ip
+}

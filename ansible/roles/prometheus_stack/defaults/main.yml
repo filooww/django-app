@@ -1,0 +1,27 @@
+prometheus_stack_dir: /opt/monitoring
+
+prometheus_stack_prometheus_image: prom/prometheus:v3.16.0
+prometheus_stack_alertmanager_image: prom/alertmanager:v0.34.2
+prometheus_stack_grafana_image: grafana/grafana:13.2.6
+prometheus_stack_blackbox_image: prom/blackbox-exporter:v0.29.1
+
+prometheus_stack_retention: 15d
+prometheus_stack_scrape_interval: 15s
+
+# UIs listen on localhost only. Open them from the laptop with SSM port forwarding (terraform output grafana_tunnel)
+prometheus_stack_bind_ip: 127.0.0.1
+
+# EC2 service discovery: every running instance with this Project tag is a scrape target
+prometheus_stack_aws_region: "{{ aws_region }}"
+prometheus_stack_ec2_project_tag: "{{ project_name }}"
+
+# Blackbox HTTP checks of the application (private IP: see the security group comment in Terraform)
+prometheus_stack_http_probes:
+  - "http://{{ hostvars[groups['django'][0]]['private_ip'] }}:{{ hostvars[groups['django'][0]]['django_port'] }}/health/"
+  - "http://{{ hostvars[groups['django'][0]]['private_ip'] }}:{{ hostvars[groups['django'][0]]['django_port'] }}/"
+
+prometheus_stack_grafana_admin_password: "{{ vault_grafana_admin_password }}"
+
+# Telegram notifications are optional: without a token alerts are visible in the Alertmanager and Grafana UIs only
+prometheus_stack_telegram_bot_token: "{{ vault_telegram_bot_token | default('') }}"
+prometheus_stack_telegram_chat_id: "{{ telegram_chat_id | default('') }}"

@@ -1,0 +1,15 @@
+node_exporter_version: "1.12.1"
+node_exporter_arch_map:
+  x86_64: amd64
+  aarch64: arm64
+node_exporter_arch: "{{ node_exporter_arch_map[ansible_architecture] }}"
+node_exporter_release_url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}"
+node_exporter_archive: "node_exporter-{{ node_exporter_version }}.linux-{{ node_exporter_arch }}"
+node_exporter_binary: /usr/local/bin/node_exporter
+node_exporter_user: node_exporter
+# Listen only on the private IP: Prometheus scrapes over the VPC, the security group allows only the monitoring server
+node_exporter_listen: "{{ private_ip }}:9100"
+node_exporter_collectors:
+  - systemd
+  - processes
+node_exporter_fs_exclude: "^/(dev|proc|sys|run|snap|var/lib/docker/.+)($|/)"

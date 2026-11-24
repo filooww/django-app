@@ -96,3 +96,14 @@ variable "disk_alarm_threshold" {
   type    = number
   default = 85
 }
+
+variable "monitoring_instance_type" {
+  type    = string
+  default = "t3.small"
+}
+
+variable "monitoring_root_volume_size" {
+  type        = number
+  default     = 30
+  description = "Root disk of the monitoring server, holds the Prometheus TSDB"
+}

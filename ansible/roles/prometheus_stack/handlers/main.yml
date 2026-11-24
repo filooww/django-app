@@ -1,0 +1,23 @@
+# --web.enable-lifecycle: Prometheus and Alertmanager re-read config on POST /-/reload without a restart
+- name: Reload Prometheus
+  ansible.builtin.uri:
+    url: "http://{{ prometheus_stack_bind_ip }}:9090/-/reload"
+    method: POST
+  register: prometheus_stack_reload
+  until: prometheus_stack_reload is succeeded
+  retries: 10
+  delay: 3
+
+- name: Reload Alertmanager
+  ansible.builtin.uri:
+    url: "http://{{ prometheus_stack_bind_ip }}:9093/-/reload"
+    method: POST
+  register: prometheus_stack_am_reload
+  until: prometheus_stack_am_reload is succeeded
+  retries: 10
+  delay: 3
+
+- name: Restart monitoring stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ prometheus_stack_dir }}"
+    state: restarted

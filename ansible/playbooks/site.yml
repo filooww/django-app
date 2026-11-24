@@ -7,8 +7,11 @@
 - name: Application
   ansible.builtin.import_playbook: application.yml
 
-- name: Monitoring
+- name: CloudWatch Agent
   hosts: all
   become: true
   roles:
     - monitoring
+
+- name: Prometheus monitoring
+  ansible.builtin.import_playbook: prometheus.yml

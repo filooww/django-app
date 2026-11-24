@@ -1,0 +1,20 @@
+# Managed by Ansible
+[Unit]
+Description=Prometheus PostgreSQL exporter
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+User={{ postgres_exporter_user }}
+Group={{ postgres_exporter_user }}
+Environment="DATA_SOURCE_NAME={{ postgres_exporter_dsn }}"
+ExecStart={{ postgres_exporter_binary }} --web.listen-address={{ postgres_exporter_listen }}
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

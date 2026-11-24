@@ -1,0 +1,32 @@
+# Application alerts from the outside (blackbox): what a user would see
+groups:
+  - name: application
+    rules:
+      - alert: EndpointDown
+        expr: probe_success{job="blackbox-http"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HTTP check failed: {{ $labels.instance }}"
+          description: "The endpoint has not returned 2xx for 2 minutes."
+
+      - alert: SlowResponse
+        expr: avg_over_time(probe_duration_seconds{job="blackbox-http"}[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slow responses from {{ $labels.instance }}"
+          description: "Average probe time is {{ $value | humanizeDuration }} over 5 minutes (threshold 1s)."
+
+      - alert: ContainerHighMemory
+        expr: |
+          container_memory_working_set_bytes{name!=""}
+            / on (instance, name) (container_spec_memory_limit_bytes{name!=""} > 0) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} on {{ $labels.instance }} is close to its memory limit"
+          description: "{{ $value | humanizePercentage }} of the memory limit is used."
