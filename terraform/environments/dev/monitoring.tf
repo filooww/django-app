@@ -1,13 +1,15 @@
 locals {
   instances = {
-    django   = module.django.id
-    postgres = module.postgres.id
+    django     = module.django.id
+    postgres   = module.postgres.id
+    monitoring = module.monitoring.id
   }
 
   disk_alarms = {
-    django-root   = { instance = module.django.id, path = "/" }
-    postgres-root = { instance = module.postgres.id, path = "/" }
-    postgres-data = { instance = module.postgres.id, path = "/var/lib/postgresql" }
+    django-root     = { instance = module.django.id, path = "/" }
+    postgres-root   = { instance = module.postgres.id, path = "/" }
+    postgres-data   = { instance = module.postgres.id, path = "/var/lib/postgresql" }
+    monitoring-root = { instance = module.monitoring.id, path = "/" }
   }
 
   alarm_actions = var.alarm_email != "" ? [aws_sns_topic.alarms[0].arn] : []

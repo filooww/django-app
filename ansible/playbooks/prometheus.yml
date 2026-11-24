@@ -1,0 +1,26 @@
+# Prometheus monitoring: exporters on every server, the stack on the monitoring server.
+# Exporters go first, so the final check on the monitoring server sees every target up.
+- name: Host metrics on every server
+  hosts: all
+  become: true
+  roles:
+    - node_exporter
+
+- name: PostgreSQL metrics
+  hosts: database
+  become: true
+  roles:
+    - postgres_exporter
+
+- name: Container metrics on the application server
+  hosts: django
+  become: true
+  roles:
+    - cadvisor
+
+- name: Prometheus, Alertmanager, Grafana
+  hosts: monitoring
+  become: true
+  roles:
+    - docker
+    - prometheus_stack

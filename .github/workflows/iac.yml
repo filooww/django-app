@@ -72,3 +72,14 @@ jobs:
         run: |
           echo "lint-only" > "$RUNNER_TEMP/vault-pass"
           ANSIBLE_VAULT_PASSWORD_FILE="$RUNNER_TEMP/vault-pass" ansible-lint --offline playbooks/ roles/
+
+  prometheus-rules:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check alert rules and run their unit tests
+        working-directory: ansible/roles/prometheus_stack/files
+        run: |
+          docker run --rm -v "$PWD":/w -w /w --entrypoint promtool prom/prometheus:v3.16.0 check rules rules/*.yml
+          docker run --rm -v "$PWD":/w -w /w/tests --entrypoint promtool prom/prometheus:v3.16.0 test rules alerts.test.yml

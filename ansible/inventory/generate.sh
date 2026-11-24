@@ -22,6 +22,9 @@ django-server ansible_host=\(host(.django_instance_id.value; .django_public_ip.v
 [database]
 postgres-server ansible_host=\(host(.postgres_instance_id.value; .postgres_public_ip.value)) public_ip=\(.postgres_public_ip.value) private_ip=\(.postgres_private_ip.value) ebs_volume_id=\(.postgres_data_volume_id.value) backup_bucket=\(.backup_bucket.value) aws_region=\(.aws_region.value)
 
+[monitoring]
+monitoring-server ansible_host=\(host(.monitoring_instance_id.value; .monitoring_public_ip.value)) private_ip=\(.monitoring_private_ip.value) aws_region=\(.aws_region.value)
+
 [all:vars]
 ansible_user=ubuntu
 ansible_ssh_private_key_file=\($key)" +

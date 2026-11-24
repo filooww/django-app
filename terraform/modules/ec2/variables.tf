@@ -36,3 +36,14 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "metadata_hop_limit" {
+  type        = number
+  default     = 1
+  description = "IMDSv2 hop limit. 2 lets containers in a Docker bridge network reach the instance role credentials"
+
+  validation {
+    condition     = var.metadata_hop_limit >= 1 && var.metadata_hop_limit <= 2
+    error_message = "metadata_hop_limit must be 1 or 2."
+  }
+}

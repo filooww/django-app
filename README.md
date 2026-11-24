@@ -155,16 +155,18 @@ Ansible (from the admin machine) ── pull ─────┘
 │                                    EBS gp3 20 GiB, encrypted│
 │                                    /var/lib/postgresql      │
 └────────────────────────────────────────────────────────────┘
-CloudWatch Agent on both hosts ──► metrics (CWAgent) + logs, alarms: CPU, disk, status check
+CloudWatch Agent on every host ──► metrics (CWAgent) + logs, alarms: CPU, disk, status check
 Admin access (shell and Ansible) ──► SSM Session Manager, port 22 closed
+Monitoring EC2 (t3.small) ──► Prometheus, Alertmanager, Grafana; scrapes node_exporter,
+                              postgres_exporter, cAdvisor over the VPC (see Monitoring below)
 ```
 
 ### Responsibilities
 
 | Tool | Does | Does not |
 |---|---|---|
-| Terraform | VPC, subnet, IGW, routes, security groups, EC2, EBS, IAM role, CloudWatch alarms, S3 state bucket | install software |
-| Ansible | packages, users, SSH, EBS format/mount, PostgreSQL, Docker, Django container, migrations, CloudWatch Agent | create AWS resources |
+| Terraform | VPC, subnet, IGW, routes, security groups, EC2 (Django, PostgreSQL, monitoring), EBS, IAM roles, CloudWatch alarms, S3 state bucket | install software |
+| Ansible | packages, users, SSH, EBS format/mount, PostgreSQL, Docker, Django container, migrations, CloudWatch Agent, exporters, Prometheus stack | create AWS resources |
 | GitHub Actions | build and push the image to GHCR | connect to EC2, run Terraform or Ansible, deploy |
 
 
@@ -243,7 +245,9 @@ git fetch origin
 ansible-playbook playbooks/site.yml -e django_image_tag=$(git rev-parse --short=7 origin/main)
 ```
 
-`site.yml` runs: common → EBS → PostgreSQL → Docker → Django → monitoring.
+`site.yml` runs: common → EBS → PostgreSQL → Docker → Django → CloudWatch Agent → exporters → Prometheus stack.
+
+Before the first run add the Grafana admin password (see [Monitoring](#monitoring-prometheus-grafana-alertmanager)).
 
 ### Deployment of a new version
 
@@ -296,6 +300,108 @@ aws s3 ls s3://$(terraform -chdir=terraform/environments/dev output -raw backup_
 sudo -u postgres sh -c 'pg_restore --clean --if-exists --dbname=django "$(ls -t /var/backups/postgresql/*.dump | head -1)"'
 ```
 
+### Monitoring (Prometheus, Grafana, Alertmanager)
+
+```
+                       Monitoring EC2 (no inbound rules)
+                       ┌───────────────────────────────────────────────┐
+ laptop ── SSM ───────►│ Grafana :3000 ──► Prometheus :9090 ──► Alertmanager :9093 ──► Telegram (optional)
+ port forward          │                     │  ▲ rules: node, postgres, application
+                       │                     │  └─ EC2 API: which instances have tag Project=devops-aws?
+                       │ blackbox-exporter ◄─┤
+                       └─────────────────────┼─────────────────────────┘
+          pull every 15s over the VPC        │
+        ┌────────────────────────────────────┼──────────────────────────────┐
+        ▼                                    ▼                              ▼
+ Django EC2                          PostgreSQL EC2                   Monitoring EC2
+ node_exporter :9100                 node_exporter :9100              node_exporter :9100
+ cAdvisor :8080 (containers)         postgres_exporter :9187
+ Django :8000 ◄── blackbox HTTP check
+```
+
+| Component | Where | What it gives |
+|---|---|---|
+| node_exporter 1.12.1 | every server, systemd, binary checked against `sha256sums.txt` | CPU, memory, disk, network, load (USE method) |
+| postgres_exporter 0.20.1 | database server, systemd, connects over the unix socket as a role with `pg_monitor` (peer auth, no password) | `pg_up`, connections, transactions, database size |
+| cAdvisor 0.55.1 | Django server, container | CPU and memory of every Docker container |
+| blackbox-exporter 0.29.1 | monitoring server | `/health/` and `/` answer 2xx, response time: what a user sees |
+| Prometheus 3.16.0 | monitoring server | pull model, 15 s scrape, 15 days retention, alert rules |
+| Alertmanager 0.34.2 | monitoring server | grouping, inhibition, routing; Telegram when a bot token is set |
+| Grafana 13.2.6 | monitoring server | data sources and dashboards provisioned from Git |
+
+How targets are found: Prometheus uses EC2 service discovery. It asks the EC2 API for running instances tagged `Project=devops-aws` (and `Role=postgres` / `Role=django` for the exporters that run on one server only) and scrapes their private IPs. The `Name` and `Role` tags become the `instance` and `role` labels, so a new server with the right tags is monitored without editing the config. The monitoring role has `ec2:DescribeInstances` for that; the instance has IMDS hop limit 2 because Prometheus runs in a Docker bridge network.
+
+Network: the monitoring server has no inbound rules. Exporters listen on the private IP only, and their security groups accept the scrape ports only from the monitoring security group. Grafana, Prometheus and Alertmanager listen on `127.0.0.1` and are opened through SSM port forwarding.
+
+#### Alerts
+
+| Alert | Condition | Severity |
+|---|---|---|
+| `TargetDown` | an exporter cannot be scraped for 1 min | critical |
+| `HighCpuUsage` | CPU > 80% for 2 min | warning |
+| `HighMemoryUsage` | memory > 90% for 5 min | warning |
+| `LowDiskSpace` | < 15% free on an ext4/xfs filesystem | warning |
+| `DiskSpaceCritical` | < 5% free | critical |
+| `DiskWillFillIn24h` | linear trend of the last 6 h reaches zero within 24 h | warning |
+| `PostgresDown` | `pg_up == 0` for 1 min | critical |
+| `PostgresTooManyConnections` | > 80% of `max_connections` for 5 min | warning |
+| `EndpointDown` | blackbox check not 2xx for 2 min | critical |
+| `SlowResponse` | average check time > 1 s over 5 min | warning |
+| `ContainerHighMemory` | container > 90% of its memory limit | warning |
+
+Alertmanager groups notifications by alert name and server, repeats critical alerts every hour and warnings every 4 hours. Inhibition: `TargetDown` hides warnings for the same server, `DiskSpaceCritical` hides `LowDiskSpace` for the same filesystem.
+
+Rules have unit tests (`ansible/roles/prometheus_stack/files/tests/alerts.test.yml`): `promtool` feeds fake series and checks which alerts fire. CI (`iac.yml`, job `prometheus-rules`) runs `promtool check rules` and `promtool test rules` on every PR. On the server Ansible validates `prometheus.yml`, rules and `alertmanager.yml` with `promtool` / `amtool` before writing them, so a broken config never replaces a working one.
+
+#### Deploy
+
+```bash
+cd ansible
+read -rs "G?Grafana admin password: " && ansible-vault encrypt_string "$G" --name vault_grafana_admin_password >> group_vars/monitoring.yml; unset G
+./inventory/generate.sh
+ansible-playbook playbooks/prometheus.yml
+```
+
+The last task of the play waits until every target in Prometheus is `up` and prints the list.
+
+Optional Telegram notifications: create a bot with @BotFather, put `telegram_chat_id: <id>` into `group_vars/monitoring.yml`, add the token the same way as the password (`--name vault_telegram_bot_token`) and rerun the play.
+
+#### Open the UIs
+
+```bash
+cd terraform/environments/dev
+$(terraform output -raw grafana_tunnel)        # http://localhost:3000, user admin
+```
+
+Prometheus and Alertmanager: the same command with `portNumber=9090,localPortNumber=9090` or `9093`.
+
+Dashboards (folder `devops-aws`, files in `ansible/roles/prometheus_stack/files/grafana/dashboards/`):
+
+- **Servers**: up/down, uptime, CPU, load vs cores, memory, disk usage by mount point, disk I/O, network. The `Server` variable switches between one, several or all servers.
+- **Application and database**: HTTP checks and response time, PostgreSQL up, size, connections by state, transactions per second, container CPU and memory, firing alerts and scrape targets.
+
+#### Check that alerts work
+
+CPU load on the Django server for 5 minutes (`HighCpuUsage` goes pending, then firing after 2 minutes):
+
+```bash
+cd ansible
+ansible django -b -B 400 -P 0 -m shell -a 'timeout 300 sh -c "for i in \$(seq \$(nproc)); do yes > /dev/null & done; wait"'
+```
+
+Fill the root disk until 10% is left (`LowDiskSpace` fires after 1 minute), then free it:
+
+```bash
+ansible django -b -m shell -a 'fallocate -l $(df --output=avail,size -B1 / | awk "NR==2{print \$1 - int(\$2*0.10)}") /var/tmp/fill.img'
+ansible django -b -m file -a 'path=/var/tmp/fill.img state=absent'
+```
+
+Status of the scrape targets from the command line:
+
+```bash
+ansible monitoring -m uri -a 'url=http://127.0.0.1:9090/api/v1/targets return_content=true' | grep -o '"health":"[a-z]*"' | sort | uniq -c
+```
+
 ### Destroy
 
 ```bash
@@ -314,6 +420,7 @@ Emergency SSH from the admin IP: `terraform apply -var enable_ssh=true`, then `C
 
 ### Next steps
 
+- Application metrics from Django itself (`django-prometheus`): request rate, errors and latency per view (RED method), p95/p99
 - HTTPS: needs a domain (ACM certificate on an ALB, or Let's Encrypt behind a reverse proxy)
 - Private subnet for PostgreSQL with a NAT gateway or VPC endpoints for SSM, CloudWatch and S3
 
@@ -360,3 +467,25 @@ A repeated `site.yml` run changes nothing (idempotent roles):
 CloudWatch alarms for CPU, disk space and status checks:
 
 ![cloudwatch alarms](screenshots/ec2-cloudwatch-alarms.png)
+
+### Monitoring
+
+Grafana, dashboard **Servers**: all three servers found by EC2 service discovery; the CPU spike on Django is the load test that fired `HighCpuUsage`:
+
+![grafana servers](screenshots/mon-grafana-servers.png)
+
+Dashboard **Application and database**: blackbox HTTP checks, PostgreSQL from postgres_exporter, containers from cAdvisor:
+
+![grafana application](screenshots/mon-grafana-app.png)
+
+Prometheus targets: every exporter is up, EC2 discovery adds `instance`, `role`, `instance_id` and `az` labels:
+
+![prometheus targets](screenshots/mon-prometheus-targets.png)
+
+Alert rules during the disk test: `LowDiskSpace` is firing, `DiskWillFillIn24h` is pending:
+
+![prometheus alerts](screenshots/mon-prometheus-alerts.png)
+
+The same alert in Alertmanager, grouped by alert name and server:
+
+![alertmanager](screenshots/mon-alertmanager.png)

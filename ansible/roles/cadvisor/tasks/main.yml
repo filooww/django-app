@@ -1,0 +1,30 @@
+# cAdvisor reads cgroups and the Docker state on the host and exposes per-container CPU, memory and network metrics
+- name: Run cAdvisor
+  community.docker.docker_container:
+    name: cadvisor
+    image: "{{ cadvisor_image }}"
+    restart_policy: unless-stopped
+    privileged: true
+    devices: ["/dev/kmsg"]
+    command:
+      - --housekeeping_interval=15s
+      - --docker_only=true
+      - --store_container_labels=false
+    published_ports: ["{{ cadvisor_listen_ip }}:{{ cadvisor_port }}:8080"]
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    log_driver: json-file
+    log_options: { max-size: 10m, max-file: "3" }
+
+- name: Check that cAdvisor serves container metrics
+  ansible.builtin.uri:
+    url: "http://{{ cadvisor_listen_ip }}:{{ cadvisor_port }}/metrics"
+    return_content: true
+  register: cadvisor_metrics
+  failed_when: "'container_cpu_usage_seconds_total' not in cadvisor_metrics.content"
+  retries: 10
+  delay: 3
+  until: cadvisor_metrics is succeeded
